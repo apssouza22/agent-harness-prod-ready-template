@@ -1,16 +1,13 @@
 """This file contains the prompts for the agent."""
 
-import os
-from datetime import datetime
 
-from src.app.core.common.config import settings
+from src.app.agents.example1.agent_example import AgentExample1
+from src.app.agents.tools import tools
+from src.app.core.checkpoint.checkpointer import get_checkpointer
+from src.app.core.llm.llm import llm_service
 
 
-def load_system_prompt(**kwargs):
-    """Load the system prompt from the file."""
-    with open(os.path.join(os.path.dirname(__file__), "system.md"), "r") as f:
-        return f.read().format(
-            agent_name=settings.PROJECT_NAME + " Agent",
-            current_date_and_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            **kwargs,
-        )
+async def get_agent_example() -> AgentExample1:
+    agent = AgentExample1("Agent Example", llm_service, tools, await get_checkpointer())
+    await agent.compile()
+    return agent

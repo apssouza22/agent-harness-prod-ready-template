@@ -1,0 +1,49 @@
+"""Open Deep Research agent module.
+
+This package contains the Deep Research agent that conducts multi-step research
+using a supervisor-researcher architecture with LangGraph subgraphs.
+"""
+
+from enum import Enum
+
+
+class SearchAPI(Enum):
+    """Enumeration of available search API providers."""
+
+    ANTHROPIC = "anthropic"
+    OPENAI = "openai"
+    TAVILY = "tavily"
+    NONE = "none"
+
+
+# ──────────────────────────────────────
+# Deep Research Agent Configuration
+# ──────────────────────────────────────
+
+# General
+ALLOW_CLARIFICATION = True
+MAX_STRUCTURED_OUTPUT_RETRIES = 3
+
+# Research limits
+MAX_CONCURRENT_RESEARCH_UNITS = 5
+MAX_RESEARCHER_ITERATIONS = 6
+MAX_REACT_TOOL_CALLS = 10
+
+# Search
+SEARCH_API = SearchAPI.TAVILY
+
+# Models
+RESEARCH_MODEL = "openai:gpt-4.1"
+RESEARCH_MODEL_MAX_TOKENS = 10000
+
+COMPRESSION_MODEL = "openai:gpt-4.1"
+COMPRESSION_MODEL_MAX_TOKENS = 8192
+
+FINAL_REPORT_MODEL = "openai:gpt-4.1"
+FINAL_REPORT_MODEL_MAX_TOKENS = 10000
+
+SUMMARIZATION_MODEL = "openai:gpt-4.1-mini"
+SUMMARIZATION_MODEL_MAX_TOKENS = 8192
+
+# Content
+MAX_CONTENT_LENGTH = 50000

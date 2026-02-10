@@ -14,7 +14,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 
-from src.app.agents.example1.agent_example import AgentExample1
+from src.app.agents.example1 import get_agent_example
 from src.app.api.metrics.http_metrics import llm_stream_duration_seconds
 from src.app.api.security.limiter import limiter
 from src.app.api.v1.auth import get_current_session
@@ -23,22 +23,12 @@ from src.app.api.v1.dtos.chat import (
     ChatResponse,
     StreamResponse,
 )
-from src.app.agents.example1.tools import tools
 from src.app.core.checkpoint.checkpointer import clear_checkpoints
-from src.app.core.checkpoint.checkpointer import get_checkpointer
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
-from src.app.core.llm.llm import llm_service
 from src.app.core.session.session_model import Session
 
 router = APIRouter()
-
-async def get_agent_example() -> AgentExample1:
-    agent = AgentExample1("Agent Example", llm_service, tools, await get_checkpointer())
-    await agent.compile()
-    return agent
-
-
 
 
 @router.post("/chat", response_model=ChatResponse)

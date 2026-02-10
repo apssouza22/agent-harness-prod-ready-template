@@ -1,4 +1,4 @@
-# Agent Harness -- Production-Ready AI Agent Infrastructure
+# Agent Harness template - Production-Ready AI Agent Infrastructure
 
 A harness for building and running AI agents in production. 
 You define the agent logic; the harness provides authentication, memory, observability, state persistence, rate limiting, and monitoring out of the box.

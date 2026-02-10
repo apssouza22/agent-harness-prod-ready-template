@@ -1,10 +1,11 @@
+import os
+from datetime import datetime
 from typing import Optional
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import RunnableConfig, Command
-from src.app.agents.example1 import load_system_prompt
 
 from src.app.core.agentic.agent_base import AgentAbstract
 from src.app.core.common.config import settings
@@ -85,3 +86,12 @@ class AgentExample1 (AgentAbstract):
             raise e
 
 
+
+def load_system_prompt(**kwargs):
+    """Load the system prompt from the file."""
+    with open(os.path.join(os.path.dirname(__file__), "system.md"), "r") as f:
+        return f.read().format(
+            agent_name=settings.PROJECT_NAME + " Agent",
+            current_date_and_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            **kwargs,
+        )

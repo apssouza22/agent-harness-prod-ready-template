@@ -185,6 +185,8 @@ class Settings:
         default_endpoints = {
             "chat": ["30 per minute"],
             "chat_stream": ["20 per minute"],
+            "deep_research": ["10 per minute"],
+            "deep_research_stream": ["10 per minute"],
             "messages": ["50 per minute"],
             "register": ["10 per hour"],
             "login": ["20 per minute"],
