@@ -10,10 +10,12 @@ from typing import Any, AsyncGenerator, Optional
 from asgiref.sync import sync_to_async
 from langchain_core.messages import convert_to_openai_messages
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.constants import START, END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import StateSnapshot
 
-from src.app.agents.open_deep_research.deep_researcher import build_deep_research_graph
+from src.app.agents.open_deep_research.deep_researcher import clarify_with_user, write_research_brief, supervisor_subgraph, final_report_generation
+from src.app.agents.open_deep_research.state import AgentState, AgentInputState
 from src.app.core.agentic.agent_base import AgentAbstract
 from src.app.core.common.config import Environment, settings
 from src.app.core.common.graph_utils import process_messages
@@ -144,3 +146,31 @@ class DeepResearchAgent(AgentAbstract):
                 session_id=session_id,
             )
             raise stream_error
+
+def build_deep_research_graph() -> StateGraph:
+    """Build the complete deep research workflow graph (uncompiled).
+
+    Creates the main deep research StateGraph with all nodes and edges.
+    The subgraphs (supervisor, researcher) are compiled at module level
+    and embedded as nodes in this main graph.
+
+    Returns:
+        StateGraph: The uncompiled deep research graph builder.
+    """
+    deep_researcher_builder = StateGraph(
+        AgentState,
+        input=AgentInputState,
+    )
+
+    # Add main workflow nodes for the complete research process
+    deep_researcher_builder.add_node("clarify_with_user", clarify_with_user)
+    deep_researcher_builder.add_node("write_research_brief", write_research_brief)
+    deep_researcher_builder.add_node("research_supervisor", supervisor_subgraph)
+    deep_researcher_builder.add_node("final_report_generation", final_report_generation)
+
+    # Define main workflow edges for sequential execution
+    deep_researcher_builder.add_edge(START, "clarify_with_user")
+    deep_researcher_builder.add_edge("research_supervisor", "final_report_generation")
+    deep_researcher_builder.add_edge("final_report_generation", END)
+
+    return deep_researcher_builder

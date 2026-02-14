@@ -689,30 +689,3 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
         **cleared_state
     }
 
-def build_deep_research_graph() -> StateGraph:
-    """Build the complete deep research workflow graph (uncompiled).
-
-    Creates the main deep research StateGraph with all nodes and edges.
-    The subgraphs (supervisor, researcher) are compiled at module level
-    and embedded as nodes in this main graph.
-
-    Returns:
-        StateGraph: The uncompiled deep research graph builder.
-    """
-    deep_researcher_builder = StateGraph(
-        AgentState,
-        input=AgentInputState,
-    )
-
-    # Add main workflow nodes for the complete research process
-    deep_researcher_builder.add_node("clarify_with_user", clarify_with_user)
-    deep_researcher_builder.add_node("write_research_brief", write_research_brief)
-    deep_researcher_builder.add_node("research_supervisor", supervisor_subgraph)
-    deep_researcher_builder.add_node("final_report_generation", final_report_generation)
-
-    # Define main workflow edges for sequential execution
-    deep_researcher_builder.add_edge(START, "clarify_with_user")
-    deep_researcher_builder.add_edge("research_supervisor", "final_report_generation")
-    deep_researcher_builder.add_edge("final_report_generation", END)
-
-    return deep_researcher_builder
