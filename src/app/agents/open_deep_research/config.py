@@ -12,7 +12,7 @@ class SearchAPI(Enum):
 
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
-    TAVILY = "tavily"
+    DUCKDUCKGO = "duckduckgo"
     NONE = "none"
 
 
@@ -26,11 +26,11 @@ MAX_STRUCTURED_OUTPUT_RETRIES = 3
 
 # Research limits
 MAX_CONCURRENT_RESEARCH_UNITS = 5
-MAX_RESEARCHER_ITERATIONS = 6
+MAX_RESEARCHER_ITERATIONS = 3
 MAX_REACT_TOOL_CALLS = 10
 
 # Search
-SEARCH_API = SearchAPI.TAVILY
+SEARCH_API = SearchAPI.DUCKDUCKGO
 
 # Models
 RESEARCH_MODEL = "openai:gpt-4.1"

@@ -144,10 +144,10 @@ You can use any of the tools provided to you to find resources that can help ans
 
 <Available Tools>
 You have access to two main tools:
-1. **tavily_search**: For conducting web searches to gather information
+1. **duckduckgo_search**: For conducting web searches to gather information
 2. **think_tool**: For reflection and strategic planning during research
 
-**CRITICAL: Use think_tool after each search to reflect on results and plan next steps. Do not call think_tool with the tavily_search or any other tools. It should be to reflect on the results of the search.**
+**CRITICAL: Use think_tool after each search to reflect on results and plan next steps. Do not call think_tool with the duckduckgo_search or any other tools. It should be to reflect on the results of the search.**
 </Available Tools>
 
 <Instructions>

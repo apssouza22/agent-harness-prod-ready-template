@@ -434,7 +434,7 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> Co
     
     This function handles various types of researcher tool calls:
     1. think_tool - Strategic reflection that continues the research conversation
-    2. Search tools (tavily_search, web_search) - Information gathering
+    2. Search tools (duckduckgo_search, web_search) - Information gathering
     3. ResearchComplete - Signals completion of individual research task
     
     Args:
