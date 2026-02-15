@@ -4,6 +4,7 @@ from typing import Optional, Any, AsyncGenerator
 from asgiref.sync import sync_to_async
 from langchain_core.messages import ToolMessage
 from langchain_core.messages import convert_to_openai_messages
+from langchain_core.tools import BaseTool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import StateSnapshot, Command
@@ -25,7 +26,7 @@ class AgentAbstract:
     """Example agent to demonstrate the agentic framework."""
     _graph: Optional[CompiledStateGraph] = None
 
-    def __init__(self, name, llm_service: LLMService, tools: list, checkpointer: AsyncPostgresSaver):
+    def __init__(self, name, llm_service: LLMService, tools: list[BaseTool], checkpointer: AsyncPostgresSaver = None):
         self.checkpointer = checkpointer
         self.name = name
         self.tools = tools

@@ -6,15 +6,9 @@ using a supervisor-researcher architecture with LangGraph subgraphs.
 
 from enum import Enum
 
+from langchain.chat_models import init_chat_model
 
-class SearchAPI(Enum):
-    """Enumeration of available search API providers."""
-
-    ANTHROPIC = "anthropic"
-    OPENAI = "openai"
-    DUCKDUCKGO = "duckduckgo"
-    NONE = "none"
-
+from src.app.agents.tools.search_tool import SearchAPI
 
 # ──────────────────────────────────────
 # Deep Research Agent Configuration
@@ -47,3 +41,8 @@ SUMMARIZATION_MODEL_MAX_TOKENS = 8192
 
 # Content
 MAX_CONTENT_LENGTH = 50000
+
+# Shared configurable model used across all subgraphs
+configurable_model = init_chat_model(
+    configurable_fields=("model", "max_tokens", "api_key"),
+)

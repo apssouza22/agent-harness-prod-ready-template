@@ -1,0 +1,241 @@
+"""Supervisor subgraph extending AgentAbstract.
+
+This module provides the SupervisorSubgraph class that wraps the research
+supervisor workflow (planning, delegation, tool execution) in the project's
+AgentAbstract class structure.
+"""
+
+import asyncio
+from typing import Literal, Optional
+
+from langchain_core.messages import (
+    HumanMessage,
+    ToolMessage,
+)
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.constants import START, END
+from langgraph.graph.state import CompiledStateGraph, StateGraph
+from langgraph.types import Command
+
+from src.app.agents.open_deep_research.config import (
+    MAX_CONCURRENT_RESEARCH_UNITS,
+    MAX_RESEARCHER_ITERATIONS,
+    MAX_STRUCTURED_OUTPUT_RETRIES,
+    RESEARCH_MODEL,
+    RESEARCH_MODEL_MAX_TOKENS,
+    configurable_model,
+)
+from src.app.agents.open_deep_research.state import (
+    ConductResearch,
+    ResearchComplete,
+    SupervisorState,
+)
+from src.app.agents.open_deep_research.utils import (
+    get_api_key_for_model,
+    get_notes_from_tool_calls,
+    is_token_limit_exceeded,
+    think_tool,
+)
+from src.app.core.agentic.agent_base import AgentAbstract
+from src.app.core.common.logging import logger
+from src.app.core.llm.llm import LLMService
+
+
+class SupervisorSubgraph(AgentAbstract):
+    """Lead research supervisor subgraph that plans and delegates research tasks.
+
+    The supervisor analyzes the research brief and decides how to break down
+    the research into manageable tasks. It delegates to sub-researchers via
+    a compiled researcher subgraph and coordinates the overall research process.
+
+    The supervisor manages its own LLM models and tools internally
+    through configurable_model, so the harness LLMService and tools
+    are not used directly by the graph nodes.
+    """
+
+    _graph: Optional[CompiledStateGraph] = None
+
+    def __init__(self, name: str, llm_service: LLMService, tools: list[BaseTool], checkpointer: AsyncPostgresSaver = None):
+        super().__init__(name, llm_service, tools, checkpointer)
+        self._researcher_subgraph: Optional[CompiledStateGraph] = None
+
+    def set_researcher_subgraph(self, researcher_graph: CompiledStateGraph):
+        """Set the compiled researcher subgraph used for research delegation.
+
+        Args:
+            researcher_graph: The compiled researcher subgraph instance.
+        """
+        self._researcher_subgraph = researcher_graph
+
+    async def _supervisor_node(self, state: SupervisorState, config: RunnableConfig) -> Command[Literal["supervisor_tools"]]:
+        """Lead research supervisor that plans research strategy and delegates to researchers.
+
+        The supervisor analyzes the research brief and decides how to break down the research
+        into manageable tasks. It can use think_tool for strategic planning, ConductResearch
+        to delegate tasks to sub-researchers, or ResearchComplete when satisfied with findings.
+
+        Args:
+            state: Current supervisor state with messages and research context
+            config: Runtime configuration with model settings
+
+        Returns:
+            Command to proceed to supervisor_tools for tool execution
+        """
+        logger.info("node_start", node="_supervisor_node")
+        research_model_config = {
+            "model": RESEARCH_MODEL,
+            "max_tokens": RESEARCH_MODEL_MAX_TOKENS,
+            "api_key": get_api_key_for_model(RESEARCH_MODEL, config),
+            "tags": ["langsmith:nostream"]
+        }
+
+        research_model = (
+            configurable_model
+            .bind_tools(self.tools)
+            .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
+            .with_config(research_model_config)
+        )
+
+        supervisor_messages = state.get("supervisor_messages", [])
+        response = await research_model.ainvoke(supervisor_messages)
+
+        return Command(
+            goto="supervisor_tools",
+            update={
+                "supervisor_messages": [response],
+                "research_iterations": state.get("research_iterations", 0) + 1
+            }
+        )
+
+    async def _supervisor_tools_node(self, state: SupervisorState, config: RunnableConfig) -> Command[Literal["supervisor", "__end__"]]:
+        """Execute tools called by the supervisor, including research delegation and strategic thinking.
+
+        This function handles three types of supervisor tool calls:
+        1. think_tool - Strategic reflection that continues the conversation
+        2. ConductResearch - Delegates research tasks to sub-researchers
+        3. ResearchComplete - Signals completion of research phase
+
+        Args:
+            state: Current supervisor state with messages and iteration count
+            config: Runtime configuration with research limits and model settings
+
+        Returns:
+            Command to either continue supervision loop or end research phase
+        """
+        logger.info("node_start", node="_supervisor_tools_node")
+        supervisor_messages = state.get("supervisor_messages", [])
+        research_iterations = state.get("research_iterations", 0)
+        most_recent_message = supervisor_messages[-1]
+
+        exceeded_allowed_iterations = research_iterations > MAX_RESEARCHER_ITERATIONS
+        no_tool_calls = not most_recent_message.tool_calls
+        research_complete_tool_call = any(
+            tool_call["name"] == "ResearchComplete"
+            for tool_call in most_recent_message.tool_calls
+        )
+
+        if exceeded_allowed_iterations or no_tool_calls or research_complete_tool_call:
+            return Command(
+                goto=END,
+                update={
+                    "notes": get_notes_from_tool_calls(supervisor_messages),
+                    "research_brief": state.get("research_brief", "")
+                }
+            )
+
+        all_tool_messages = []
+        update_payload = {"supervisor_messages": []}
+
+        think_tool_calls = [
+            tool_call for tool_call in most_recent_message.tool_calls
+            if tool_call["name"] == "think_tool"
+        ]
+
+        for tool_call in think_tool_calls:
+            reflection_content = tool_call["args"]["reflection"]
+            all_tool_messages.append(ToolMessage(
+                content=f"Reflection recorded: {reflection_content}",
+                name="think_tool",
+                tool_call_id=tool_call["id"]
+            ))
+
+        conduct_research_calls = [
+            tool_call for tool_call in most_recent_message.tool_calls
+            if tool_call["name"] == "ConductResearch"
+        ]
+
+        if conduct_research_calls:
+            try:
+                allowed_conduct_research_calls = conduct_research_calls[:MAX_CONCURRENT_RESEARCH_UNITS]
+                overflow_conduct_research_calls = conduct_research_calls[MAX_CONCURRENT_RESEARCH_UNITS:]
+
+                research_tasks = [
+                    self._researcher_subgraph.ainvoke({
+                        "researcher_messages": [
+                            HumanMessage(content=tool_call["args"]["research_topic"])
+                        ],
+                        "research_topic": tool_call["args"]["research_topic"]
+                    }, config)
+                    for tool_call in allowed_conduct_research_calls
+                ]
+
+                tool_results = await asyncio.gather(*research_tasks)
+
+                for observation, tool_call in zip(tool_results, allowed_conduct_research_calls):
+                    all_tool_messages.append(ToolMessage(
+                        content=observation.get("compressed_research", "Error synthesizing research report: Maximum retries exceeded"),
+                        name=tool_call["name"],
+                        tool_call_id=tool_call["id"]
+                    ))
+
+                for overflow_call in overflow_conduct_research_calls:
+                    all_tool_messages.append(ToolMessage(
+                        content=f"Error: Did not run this research as you have already exceeded the maximum number of concurrent research units. Please try again with {MAX_CONCURRENT_RESEARCH_UNITS} or fewer research units.",
+                        name="ConductResearch",
+                        tool_call_id=overflow_call["id"]
+                    ))
+
+                raw_notes_concat = "\n".join([
+                    "\n".join(observation.get("raw_notes", []))
+                    for observation in tool_results
+                ])
+
+                if raw_notes_concat:
+                    update_payload["raw_notes"] = [raw_notes_concat]
+
+            except Exception as e:
+                if is_token_limit_exceeded(e, RESEARCH_MODEL) or True:
+                    return Command(
+                        goto=END,
+                        update={
+                            "notes": get_notes_from_tool_calls(supervisor_messages),
+                            "research_brief": state.get("research_brief", "")
+                        }
+                    )
+
+        update_payload["supervisor_messages"] = all_tool_messages
+        return Command(
+            goto="supervisor",
+            update=update_payload
+        )
+
+    async def _create_graph(self) -> StateGraph:
+        """Build the supervisor subgraph workflow.
+
+        Returns:
+            StateGraph: The uncompiled supervisor graph with all nodes and edges.
+        """
+        try:
+            graph_builder = StateGraph(SupervisorState)
+
+            graph_builder.add_node("supervisor", self._supervisor_node)
+            graph_builder.add_node("supervisor_tools", self._supervisor_tools_node)
+
+            graph_builder.add_edge(START, "supervisor")
+
+            return graph_builder
+        except Exception as e:
+            logger.error("supervisor_subgraph_creation_failed", error=str(e))
+            raise e

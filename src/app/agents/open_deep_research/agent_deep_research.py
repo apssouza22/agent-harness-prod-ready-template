@@ -9,13 +9,18 @@ from typing import Any, AsyncGenerator, Optional
 
 from asgiref.sync import sync_to_async
 from langchain_core.messages import convert_to_openai_messages
+from langchain_core.tools import tool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.constants import START, END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import StateSnapshot
 
-from src.app.agents.open_deep_research.deep_researcher import clarify_with_user, write_research_brief, supervisor_subgraph, final_report_generation
-from src.app.agents.open_deep_research.state import AgentState, AgentInputState
+from src.app.agents.open_deep_research.deep_researcher import clarify_with_user, write_research_brief, final_report_generation
+from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgent
+from src.app.agents.open_deep_research.supervisor_subgraph import SupervisorSubgraph
+from src.app.agents.open_deep_research.state import AgentState, AgentInputState, ConductResearch, ResearchComplete
+from src.app.agents.open_deep_research.utils import get_all_tools
+from src.app.agents.tools.think_tool import think_tool
 from src.app.core.agentic.agent_base import AgentAbstract
 from src.app.core.common.config import Environment, settings
 from src.app.core.common.graph_utils import process_messages
@@ -45,15 +50,26 @@ class DeepResearchAgent(AgentAbstract):
     def __init__(self, name: str, llm_service: LLMService, checkpointer: AsyncPostgresSaver):
         # Pass empty tools list; deep researcher manages its own tools internally
         super().__init__(name, llm_service, [], checkpointer)
+        lead_researcher_tools = [tool(ConductResearch), tool(ResearchComplete), think_tool]
+        self.researcher_subgraph = ResearcherAgent("Researcher", llm_service, get_all_tools(), None)
+        self.supervisor_subgraph = SupervisorSubgraph("Supervisor", llm_service, lead_researcher_tools, None)
 
     async def _create_graph(self) -> StateGraph:
         """Build the deep research multi-subgraph workflow.
+
+        Compiles the researcher and supervisor subgraphs first, then builds
+        the main deep research graph using their compiled graphs as nodes.
 
         Returns:
             StateGraph: The uncompiled deep research graph with all nodes and edges.
         """
         try:
-            return build_deep_research_graph()
+            # Compile subgraphs: researcher first (supervisor depends on it)
+            await self.researcher_subgraph.compile()
+            self.supervisor_subgraph.set_researcher_subgraph(self.researcher_subgraph._graph)
+            await self.supervisor_subgraph.compile()
+
+            return build_deep_research_graph(self.supervisor_subgraph._graph)
         except Exception as e:
             logger.error("deep_research_graph_creation_failed", error=str(e), environment=settings.ENVIRONMENT.value)
             raise e
@@ -147,12 +163,15 @@ class DeepResearchAgent(AgentAbstract):
             )
             raise stream_error
 
-def build_deep_research_graph() -> StateGraph:
+def build_deep_research_graph(compiled_supervisor_subgraph: CompiledStateGraph) -> StateGraph:
     """Build the complete deep research workflow graph (uncompiled).
 
     Creates the main deep research StateGraph with all nodes and edges.
-    The subgraphs (supervisor, researcher) are compiled at module level
-    and embedded as nodes in this main graph.
+    The subgraphs (supervisor, researcher) are compiled by the DeepResearchAgent
+    and the supervisor's compiled graph is passed in as a parameter.
+
+    Args:
+        compiled_supervisor_subgraph: The compiled supervisor subgraph to embed as a node.
 
     Returns:
         StateGraph: The uncompiled deep research graph builder.
@@ -165,7 +184,7 @@ def build_deep_research_graph() -> StateGraph:
     # Add main workflow nodes for the complete research process
     deep_researcher_builder.add_node("clarify_with_user", clarify_with_user)
     deep_researcher_builder.add_node("write_research_brief", write_research_brief)
-    deep_researcher_builder.add_node("research_supervisor", supervisor_subgraph)
+    deep_researcher_builder.add_node("research_supervisor", compiled_supervisor_subgraph)
     deep_researcher_builder.add_node("final_report_generation", final_report_generation)
 
     # Define main workflow edges for sequential execution

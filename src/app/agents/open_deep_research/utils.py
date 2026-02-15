@@ -1,14 +1,10 @@
 """Utility functions and helpers for the Deep Research agent."""
 
-import asyncio
-import logging
 import os
 from datetime import datetime
-from typing import List
 
 from langchain_core.messages import (
     AIMessage,
-    HumanMessage,
     MessageLikeRepresentation,
     filter_messages,
 )
@@ -16,140 +12,22 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from src.app.agents.open_deep_research.config import (
-    MAX_STRUCTURED_OUTPUT_RETRIES,
     SEARCH_API,
-    SearchAPI,
 )
 from src.app.agents.open_deep_research.state import ResearchComplete
-from src.app.agents.tools import duckduckgo_search_tool
-
-##########################
-# DuckDuckGo Search Tool Utils
-##########################
-DUCKDUCKGO_SEARCH_DESCRIPTION = (
-    "A search engine for comprehensive web results. "
-    "Useful for when you need to answer questions about current events."
-)
+from src.app.agents.tools.search_tool import get_search_tool
+from src.app.agents.tools.think_tool import think_tool
 
 
-@tool(description=DUCKDUCKGO_SEARCH_DESCRIPTION)
-async def duckduckgo_search(queries: List[str]) -> str:
-    """Execute multiple DuckDuckGo search queries and return formatted results.
-
-    Args:
-        queries: List of search queries to execute
-
-    Returns:
-        Formatted string containing search results from all queries
-    """
-    # Execute all search queries in parallel
-    search_tasks = [duckduckgo_search_tool.ainvoke(query) for query in queries]
-
-    try:
-        search_results = await asyncio.gather(*search_tasks)
-    except Exception:
-        logging.warning("duckduckgo_search_failed", exc_info=True)
-        return "Search failed. Please try different search queries."
-
-    # Format the results
-    if not any(search_results):
-        return "No valid search results found. Please try different search queries."
-
-    formatted_output = "Search results:\n\n"
-    for i, (query, result) in enumerate(zip(queries, search_results)):
-        formatted_output += f"--- QUERY {i + 1}: {query} ---\n"
-        formatted_output += f"{result}\n"
-        formatted_output += "-" * 80 + "\n\n"
-
-    return formatted_output
-
-
-##########################
-# Reflection Tool Utils
-##########################
-
-@tool(description="Strategic reflection tool for research planning")
-def think_tool(reflection: str) -> str:
-    """Tool for strategic reflection on research progress and decision-making.
-
-    Use this tool after each search to analyze results and plan next steps systematically.
-    This creates a deliberate pause in the research workflow for quality decision-making.
-
-    When to use:
-    - After receiving search results: What key information did I find?
-    - Before deciding next steps: Do I have enough to answer comprehensively?
-    - When assessing research gaps: What specific information am I still missing?
-    - Before concluding research: Can I provide a complete answer now?
-
-    Reflection should address:
-    1. Analysis of current findings - What concrete information have I gathered?
-    2. Gap assessment - What crucial information is still missing?
-    3. Quality evaluation - Do I have sufficient evidence/examples for a good answer?
-    4. Strategic decision - Should I continue searching or provide my answer?
-
-    Args:
-        reflection: Your detailed reflection on research progress, findings, gaps, and next steps
-
-    Returns:
-        Confirmation that reflection was recorded for decision-making
-    """
-    return f"Reflection recorded: {reflection}"
-
-##########################
-# Tool Utils
-##########################
-
-async def get_search_tool(search_api: SearchAPI):
-    """Configure and return search tools based on the specified API provider.
-    
-    Args:
-        search_api: The search API provider to use (Anthropic, OpenAI, DuckDuckGo, or None)
-        
-    Returns:
-        List of configured search tool objects for the specified provider
-    """
-    if search_api == SearchAPI.ANTHROPIC:
-        # Anthropic's native web search with usage limits
-        return [{
-            "type": "web_search_20250305", 
-            "name": "web_search", 
-            "max_uses": 5
-        }]
-        
-    elif search_api == SearchAPI.OPENAI:
-        # OpenAI's web search preview functionality
-        return [{"type": "web_search_preview"}]
-        
-    elif search_api == SearchAPI.DUCKDUCKGO:
-        # Configure DuckDuckGo search tool with metadata
-        search_tool = duckduckgo_search
-        search_tool.metadata = {
-            **(search_tool.metadata or {}), 
-            "type": "search", 
-            "name": "web_search"
-        }
-        return [search_tool]
-        
-    elif search_api == SearchAPI.NONE:
-        # No search functionality configured
-        return []
-        
-    # Default fallback for unknown search API types
-    return []
-    
-async def get_all_tools():
+def get_all_tools():
     """Assemble complete toolkit including research and search tools.
     
     Returns:
         List of all configured and available tools for research operations
     """
-    # Start with core research tools
     tools = [tool(ResearchComplete), think_tool]
-    
-    # Add configured search tools
-    search_tools = await get_search_tool(SEARCH_API)
+    search_tools = get_search_tool(SEARCH_API)
     tools.extend(search_tools)
-    
     return tools
 
 def get_notes_from_tool_calls(messages: list[MessageLikeRepresentation]):
