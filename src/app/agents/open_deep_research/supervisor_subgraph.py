@@ -34,10 +34,10 @@ from src.app.agents.open_deep_research.state import (
 from src.app.agents.open_deep_research.utils import (
     get_api_key_for_model,
     get_notes_from_tool_calls,
-    is_token_limit_exceeded,
 )
 from src.app.core.agentic.agent_base import AgentAbstract
 from src.app.core.common.logging import logger
+from src.app.core.common.token_limit import is_token_limit_exceeded
 from src.app.core.llm.llm import LLMService
 
 
@@ -58,6 +58,16 @@ class SupervisorAgent(AgentAbstract):
     def __init__(self, name: str, llm_service: LLMService, tools: list[BaseTool], checkpointer: AsyncPostgresSaver = None):
         super().__init__(name, llm_service, tools, checkpointer)
         self._researcher_agent: Optional[ResearcherAgent] = None
+
+    def get_graph(self) -> CompiledStateGraph:
+        """Get the compiled supervisor graph instance.
+
+        Returns:
+            The compiled supervisor graph.
+        """
+        if self._graph is None:
+            raise ValueError("Supervisor graph has not been compiled yet.")
+        return self._graph
 
     def set_researcher_agent(self, researcher_agent: ResearcherAgent):
         """Set the compiled researcher subgraph used for research delegation.
@@ -164,7 +174,7 @@ class SupervisorAgent(AgentAbstract):
         update_payload = {"supervisor_messages": []}
         try:
             if conduct_research_calls:
-                update_payload = await self._research_tool_call(conduct_research_calls, all_tool_messages, supervisor_messages, state)
+                update_payload = await self._research_tool_call(conduct_research_calls, all_tool_messages)
         except Exception as e:
             if is_token_limit_exceeded(e, RESEARCH_MODEL) or True:
                 return Command(
@@ -200,7 +210,7 @@ class SupervisorAgent(AgentAbstract):
             logger.error("supervisor_subgraph_creation_failed", error=str(e))
             raise e
 
-    async def _research_tool_call(self, conduct_research_calls, all_tool_messages, supervisor_messages, state) -> dict[str, Any]:
+    async def _research_tool_call(self, conduct_research_calls, all_tool_messages) -> dict[str, Any]:
         update_payload = {"supervisor_messages": []}
         allowed_conduct_research_calls = conduct_research_calls[:MAX_CONCURRENT_RESEARCH_UNITS]
         overflow_conduct_research_calls = conduct_research_calls[MAX_CONCURRENT_RESEARCH_UNITS:]

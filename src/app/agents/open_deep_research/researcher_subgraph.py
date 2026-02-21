@@ -41,12 +41,12 @@ from src.app.agents.open_deep_research.utils import (
     anthropic_websearch_called,
     get_api_key_for_model,
     get_today_str,
-    is_token_limit_exceeded,
     openai_websearch_called,
     remove_up_to_last_ai_message,
 )
 from src.app.core.agentic.agent_base import AgentAbstract
 from src.app.core.common.logging import logger
+from src.app.core.common.token_limit import is_token_limit_exceeded
 
 
 async def execute_tool_safely(tool, args, config):
