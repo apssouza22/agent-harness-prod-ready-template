@@ -42,29 +42,28 @@ class AgentAbstract:
             },
         }
 
-    async def compile(self):
+    async def compile(self) -> Optional[CompiledStateGraph]:
         """Compile the graph and prepare for execution."""
         graph_ = await self._create_graph()
         self._graph = await self._create_compiled_graph(graph_)
+        return self._graph
 
     async def agent_invoke(
         self,
-        messages: list[Message],
+        agent_input: dict[str, Any],
         session_id: str,
         user_id: Optional[int] = None,
     ) -> list[Message] | list[Any]:
         config = await self._create_config(session_id, user_id)
-
-        relevant_memory = (await get_relevant_memory(user_id, messages[-1].content)) or "No relevant memory found."
-        cmd: Command = {"messages": dump_messages(messages), "long_term_memory": relevant_memory}
         try:
-            response = await self._graph.ainvoke(
-                input=cmd,
-                config=config,
-            )
-            bg_update_memory(user_id, convert_to_openai_messages(response["messages"]), config["metadata"])
-
-            return process_messages(response["messages"])
+            response = await self._graph.ainvoke(input=agent_input, config=config )
+            openai_style_messages = convert_to_openai_messages(response["messages"])
+            return [
+                # keep just assistant and user messages
+                Message(role=message["role"], content=str(message["content"]))
+                for message in openai_style_messages
+                if message["role"] in ["assistant", "user"] and message["content"]
+            ]
         except Exception as e:
             if settings.ENVIRONMENT == Environment.DEVELOPMENT:
                 raise e
@@ -140,7 +139,6 @@ class AgentAbstract:
         except Exception as stream_error:
             logger.error("Error in stream processing", error=str(stream_error), session_id=session_id)
             raise stream_error
-
 
     async def _tool_call_node(self, state: GraphState) -> Command:
         """Process tool calls from the last message.

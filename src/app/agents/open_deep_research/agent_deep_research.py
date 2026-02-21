@@ -17,7 +17,7 @@ from langgraph.types import StateSnapshot
 
 from src.app.agents.open_deep_research.deep_researcher import clarify_with_user, write_research_brief, final_report_generation
 from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgent
-from src.app.agents.open_deep_research.supervisor_subgraph import SupervisorSubgraph
+from src.app.agents.open_deep_research.supervisor_subgraph import SupervisorAgent
 from src.app.agents.open_deep_research.state import AgentState, AgentInputState, ConductResearch, ResearchComplete
 from src.app.agents.open_deep_research.utils import get_all_tools
 from src.app.agents.tools.think_tool import think_tool
@@ -48,11 +48,10 @@ class DeepResearchAgent(AgentAbstract):
     _graph: Optional[CompiledStateGraph] = None
 
     def __init__(self, name: str, llm_service: LLMService, checkpointer: AsyncPostgresSaver):
-        # Pass empty tools list; deep researcher manages its own tools internally
         super().__init__(name, llm_service, [], checkpointer)
         lead_researcher_tools = [tool(ConductResearch), tool(ResearchComplete), think_tool]
-        self.researcher_subgraph = ResearcherAgent("Researcher", llm_service, get_all_tools(), None)
-        self.supervisor_subgraph = SupervisorSubgraph("Supervisor", llm_service, lead_researcher_tools, None)
+        self.researcher_subagent = ResearcherAgent("Researcher", llm_service, get_all_tools(), None)
+        self.supervisor_subagent = SupervisorAgent("Supervisor", llm_service, lead_researcher_tools, None)
 
     async def _create_graph(self) -> StateGraph:
         """Build the deep research multi-subgraph workflow.
@@ -64,12 +63,11 @@ class DeepResearchAgent(AgentAbstract):
             StateGraph: The uncompiled deep research graph with all nodes and edges.
         """
         try:
-            # Compile subgraphs: researcher first (supervisor depends on it)
-            await self.researcher_subgraph.compile()
-            self.supervisor_subgraph.set_researcher_subgraph(self.researcher_subgraph._graph)
-            await self.supervisor_subgraph.compile()
+            await self.researcher_subagent.compile()
+            self.supervisor_subagent.set_researcher_agent(self.researcher_subagent)
+            await self.supervisor_subagent.compile()
 
-            return build_deep_research_graph(self.supervisor_subgraph._graph)
+            return build_deep_research_graph(self.supervisor_subagent._graph)
         except Exception as e:
             logger.error("deep_research_graph_creation_failed", error=str(e), environment=settings.ENVIRONMENT.value)
             raise e

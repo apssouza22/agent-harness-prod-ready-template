@@ -6,7 +6,7 @@ AgentAbstract class structure.
 """
 
 import asyncio
-from typing import Literal, Optional
+from typing import Literal, Optional, Any
 
 from langchain_core.messages import (
     HumanMessage,
@@ -27,23 +27,21 @@ from src.app.agents.open_deep_research.config import (
     RESEARCH_MODEL_MAX_TOKENS,
     configurable_model,
 )
+from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgent
 from src.app.agents.open_deep_research.state import (
-    ConductResearch,
-    ResearchComplete,
     SupervisorState,
 )
 from src.app.agents.open_deep_research.utils import (
     get_api_key_for_model,
     get_notes_from_tool_calls,
     is_token_limit_exceeded,
-    think_tool,
 )
 from src.app.core.agentic.agent_base import AgentAbstract
 from src.app.core.common.logging import logger
 from src.app.core.llm.llm import LLMService
 
 
-class SupervisorSubgraph(AgentAbstract):
+class SupervisorAgent(AgentAbstract):
     """Lead research supervisor subgraph that plans and delegates research tasks.
 
     The supervisor analyzes the research brief and decides how to break down
@@ -59,15 +57,15 @@ class SupervisorSubgraph(AgentAbstract):
 
     def __init__(self, name: str, llm_service: LLMService, tools: list[BaseTool], checkpointer: AsyncPostgresSaver = None):
         super().__init__(name, llm_service, tools, checkpointer)
-        self._researcher_subgraph: Optional[CompiledStateGraph] = None
+        self._researcher_agent: Optional[ResearcherAgent] = None
 
-    def set_researcher_subgraph(self, researcher_graph: CompiledStateGraph):
+    def set_researcher_agent(self, researcher_agent: ResearcherAgent):
         """Set the compiled researcher subgraph used for research delegation.
 
         Args:
-            researcher_graph: The compiled researcher subgraph instance.
+            researcher_agent: The compiled researcher subgraph instance.
         """
-        self._researcher_subgraph = researcher_graph
+        self._researcher_agent = researcher_agent
 
     async def _supervisor_node(self, state: SupervisorState, config: RunnableConfig) -> Command[Literal["supervisor_tools"]]:
         """Lead research supervisor that plans research strategy and delegates to researchers.
@@ -88,7 +86,6 @@ class SupervisorSubgraph(AgentAbstract):
             "model": RESEARCH_MODEL,
             "max_tokens": RESEARCH_MODEL_MAX_TOKENS,
             "api_key": get_api_key_for_model(RESEARCH_MODEL, config),
-            "tags": ["langsmith:nostream"]
         }
 
         research_model = (
@@ -109,7 +106,7 @@ class SupervisorSubgraph(AgentAbstract):
             }
         )
 
-    async def _supervisor_tools_node(self, state: SupervisorState, config: RunnableConfig) -> Command[Literal["supervisor", "__end__"]]:
+    async def _supervisor_tools_node(self, state: SupervisorState) -> Command[Literal["supervisor", "__end__"]]:
         """Execute tools called by the supervisor, including research delegation and strategic thinking.
 
         This function handles three types of supervisor tool calls:
@@ -146,8 +143,6 @@ class SupervisorSubgraph(AgentAbstract):
             )
 
         all_tool_messages = []
-        update_payload = {"supervisor_messages": []}
-
         think_tool_calls = [
             tool_call for tool_call in most_recent_message.tool_calls
             if tool_call["name"] == "think_tool"
@@ -166,54 +161,19 @@ class SupervisorSubgraph(AgentAbstract):
             if tool_call["name"] == "ConductResearch"
         ]
 
-        if conduct_research_calls:
-            try:
-                allowed_conduct_research_calls = conduct_research_calls[:MAX_CONCURRENT_RESEARCH_UNITS]
-                overflow_conduct_research_calls = conduct_research_calls[MAX_CONCURRENT_RESEARCH_UNITS:]
-
-                research_tasks = [
-                    self._researcher_subgraph.ainvoke({
-                        "researcher_messages": [
-                            HumanMessage(content=tool_call["args"]["research_topic"])
-                        ],
-                        "research_topic": tool_call["args"]["research_topic"]
-                    }, config)
-                    for tool_call in allowed_conduct_research_calls
-                ]
-
-                tool_results = await asyncio.gather(*research_tasks)
-
-                for observation, tool_call in zip(tool_results, allowed_conduct_research_calls):
-                    all_tool_messages.append(ToolMessage(
-                        content=observation.get("compressed_research", "Error synthesizing research report: Maximum retries exceeded"),
-                        name=tool_call["name"],
-                        tool_call_id=tool_call["id"]
-                    ))
-
-                for overflow_call in overflow_conduct_research_calls:
-                    all_tool_messages.append(ToolMessage(
-                        content=f"Error: Did not run this research as you have already exceeded the maximum number of concurrent research units. Please try again with {MAX_CONCURRENT_RESEARCH_UNITS} or fewer research units.",
-                        name="ConductResearch",
-                        tool_call_id=overflow_call["id"]
-                    ))
-
-                raw_notes_concat = "\n".join([
-                    "\n".join(observation.get("raw_notes", []))
-                    for observation in tool_results
-                ])
-
-                if raw_notes_concat:
-                    update_payload["raw_notes"] = [raw_notes_concat]
-
-            except Exception as e:
-                if is_token_limit_exceeded(e, RESEARCH_MODEL) or True:
-                    return Command(
-                        goto=END,
-                        update={
-                            "notes": get_notes_from_tool_calls(supervisor_messages),
-                            "research_brief": state.get("research_brief", "")
-                        }
-                    )
+        update_payload = {"supervisor_messages": []}
+        try:
+            if conduct_research_calls:
+                update_payload = await self._research_tool_call(conduct_research_calls, all_tool_messages, supervisor_messages, state)
+        except Exception as e:
+            if is_token_limit_exceeded(e, RESEARCH_MODEL) or True:
+                return Command(
+                    goto=END,
+                    update={
+                        "notes": get_notes_from_tool_calls(supervisor_messages),
+                        "research_brief": state.get("research_brief", "")
+                    }
+                )
 
         update_payload["supervisor_messages"] = all_tool_messages
         return Command(
@@ -239,3 +199,44 @@ class SupervisorSubgraph(AgentAbstract):
         except Exception as e:
             logger.error("supervisor_subgraph_creation_failed", error=str(e))
             raise e
+
+    async def _research_tool_call(self, conduct_research_calls, all_tool_messages, supervisor_messages, state) -> dict[str, Any]:
+        update_payload = {"supervisor_messages": []}
+        allowed_conduct_research_calls = conduct_research_calls[:MAX_CONCURRENT_RESEARCH_UNITS]
+        overflow_conduct_research_calls = conduct_research_calls[MAX_CONCURRENT_RESEARCH_UNITS:]
+
+        research_tasks = [
+            self._researcher_agent.agent_invoke({
+                "researcher_messages": [
+                    HumanMessage(content=tool_call["args"]["research_topic"])
+                ],
+                "research_topic": tool_call["args"]["research_topic"]
+            }, "session_id_placeholder", 1)
+            for tool_call in allowed_conduct_research_calls
+        ]
+
+        tool_results = await asyncio.gather(*research_tasks)
+
+        for observation, tool_call in zip(tool_results, allowed_conduct_research_calls):
+            all_tool_messages.append(ToolMessage(
+                content=observation.get("compressed_research", "Error synthesizing research report: Maximum retries exceeded"),
+                name=tool_call["name"],
+                tool_call_id=tool_call["id"]
+            ))
+
+        for overflow_call in overflow_conduct_research_calls:
+            all_tool_messages.append(ToolMessage(
+                content=f"Error: Did not run this research as you have already exceeded the maximum number of concurrent research units. Please try again with {MAX_CONCURRENT_RESEARCH_UNITS} or fewer research units.",
+                name="ConductResearch",
+                tool_call_id=overflow_call["id"]
+            ))
+
+        raw_notes_concat = "\n".join([
+            "\n".join(observation.get("raw_notes", []))
+            for observation in tool_results
+        ])
+
+        if raw_notes_concat:
+            update_payload["raw_notes"] = [raw_notes_concat]
+
+        return update_payload

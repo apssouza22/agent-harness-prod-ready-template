@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END
@@ -12,16 +12,31 @@ from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.common.metrics import llm_inference_duration_seconds
 from src.app.core.common.model.graph import GraphState
+from src.app.core.common.model.message import Message
 from src.app.core.llm.llm import LLMService
 from src.app.core.llm.llm_utils import dump_messages, prepare_messages, process_llm_response
+from src.app.core.memory.memory import get_relevant_memory, bg_update_memory
 
 
-class AgentExample1 (AgentAbstract):
+class AgentExample1(AgentAbstract):
     """Example agent to demonstrate the agentic framework."""
     _graph: Optional[CompiledStateGraph] = None
 
     def __init__(self, name, llm_service: LLMService, tools: list, checkpointer: AsyncPostgresSaver):
         super().__init__(name, llm_service, tools, checkpointer)
+
+    async def agent_invoke(
+        self,
+        messages: list[Message],
+        session_id: str,
+        user_id: Optional[int] = None,
+    ) -> list[Message] | list[Any]:
+        relevant_memory = (await get_relevant_memory(user_id, messages[-1].content)) or "No relevant memory found."
+        cmd = {"messages": dump_messages(messages), "long_term_memory": relevant_memory}
+        messages = await super().agent_invoke(cmd, session_id, user_id)
+        messages_dic = [dict(role=message.role, content=str(message.content)) for message in messages]
+        bg_update_memory(user_id, messages_dic, {"session_id": session_id, "agent_name": self.name, "user_id": user_id})
+        return messages
 
     async def _chat_node(self, state: GraphState, config: RunnableConfig) -> Command:
         """Process the chat state and generate a response.
@@ -45,9 +60,9 @@ class AgentExample1 (AgentAbstract):
         messages = prepare_messages(state.messages, current_llm, system_prompt)
 
         try:
-            # Use LLM service with automatic retries and circular fallback
             with llm_inference_duration_seconds.labels(model=model_name).time():
                 response_message = await self.llm_service.call(dump_messages(messages))
+
             response_message = process_llm_response(response_message)
             logger.info(
                 "llm_response_generated",
@@ -72,7 +87,6 @@ class AgentExample1 (AgentAbstract):
             )
             raise Exception(f"failed to get llm response after trying all models: {str(e)}")
 
-
     async def _create_graph(self) -> StateGraph:
         try:
             graph_builder = StateGraph(GraphState)
@@ -84,7 +98,6 @@ class AgentExample1 (AgentAbstract):
         except Exception as e:
             logger.error("graph_creation_failed", error=str(e), environment=settings.ENVIRONMENT.value)
             raise e
-
 
 
 def load_system_prompt(**kwargs):

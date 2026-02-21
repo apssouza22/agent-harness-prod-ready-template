@@ -60,8 +60,9 @@ async def get_relevant_memory(user_id: int, query: str) -> str:
     try:
         memory = await get_memory_instance()
         results = await memory.search(user_id=str(user_id), query=query)
-        print(results)
-        return "\n".join([f"* {result['memory']}" for result in results["results"]])
+        memory_result = "\n".join([f"* {result['memory']}" for result in results["results"]])
+        logger.debug("Retrieved relevant memory:", memory_result)
+        return memory_result
     except Exception as e:
         logger.error("failed_to_get_relevant_memory", error=str(e), user_id=user_id, query=query)
         return ""
