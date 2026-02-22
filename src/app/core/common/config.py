@@ -187,6 +187,7 @@ class Settings:
             "chat_stream": ["20 per minute"],
             "deep_research": ["10 per minute"],
             "deep_research_stream": ["10 per minute"],
+            "text_to_sql": ["15 per minute"],
             "messages": ["50 per minute"],
             "register": ["10 per hour"],
             "login": ["20 per minute"],

@@ -46,6 +46,7 @@ dependencies = [
     "rich>=13.7.0",
     "mcp[cli]>=1.6.0",
     "langchain-mcp-adapters>=0.2.1",
+    "deepagents>=0.4.3"
 ]
 
 [project.optional-dependencies]

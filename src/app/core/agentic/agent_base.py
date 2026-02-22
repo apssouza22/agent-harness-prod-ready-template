@@ -56,7 +56,7 @@ class AgentAbstract:
     ) -> list[Message] | list[Any]:
         config = await self._create_config(session_id, user_id)
         try:
-            response = await self._graph.ainvoke(input=agent_input, config=config )
+            response = await self._graph.ainvoke(input=agent_input, config=config)
             openai_style_messages = convert_to_openai_messages(response["messages"])
             return [
                 # keep just assistant and user messages
