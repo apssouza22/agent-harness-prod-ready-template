@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from typing import Optional, Any
 
+from langchain_core.tools import BaseTool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
@@ -13,7 +14,7 @@ from src.app.core.common.logging import logger
 from src.app.core.common.metrics import llm_inference_duration_seconds
 from src.app.core.common.model.graph import GraphState
 from src.app.core.common.model.message import Message
-from src.app.core.llm.llm import LLMService
+from src.app.core.llm.llm import LLMRegistry
 from src.app.core.llm.llm_utils import dump_messages, prepare_messages, process_llm_response
 from src.app.core.memory.memory import get_relevant_memory, bg_update_memory
 
@@ -22,8 +23,8 @@ class AgentExample1(AgentAbstract):
     """Example agent to demonstrate the agentic framework."""
     _graph: Optional[CompiledStateGraph] = None
 
-    def __init__(self, name, llm_service: LLMService, tools: list, checkpointer: AsyncPostgresSaver):
-        super().__init__(name, llm_service, tools, checkpointer)
+    def __init__(self, name: str, agent_name: str, tools: list[BaseTool], checkpointer: AsyncPostgresSaver):
+        super().__init__(name, agent_name, tools, checkpointer)
 
     async def agent_invoke(
         self,
@@ -48,20 +49,21 @@ class AgentExample1(AgentAbstract):
         Returns:
             Command: Command object with updated state and next node to execute.
         """
-        # Get the current LLM instance for metrics
-        current_llm = self.llm_service.get_llm()
-        model_name = (
-            current_llm.model_name
-            if current_llm and hasattr(current_llm, "model_name")
-            else settings.DEFAULT_LLM_MODEL
-        )
+        model_name = settings.DEFAULT_LLM_MODEL
+        llm = LLMRegistry.get(model_name, self.agent_name)
 
         system_prompt = load_system_prompt(long_term_memory=state.long_term_memory)
-        messages = prepare_messages(state.messages, current_llm, system_prompt)
+        messages = prepare_messages(state.messages, llm, system_prompt)
+
+        model = (
+            llm
+            .bind_tools(self._get_all_tools())
+            .with_retry(stop_after_attempt=3)
+        )
 
         try:
             with llm_inference_duration_seconds.labels(model=model_name).time():
-                response_message = await self.llm_service.call(dump_messages(messages))
+                response_message = await model.ainvoke(dump_messages(messages), config)
 
             response_message = process_llm_response(response_message)
             logger.info(
@@ -71,21 +73,18 @@ class AgentExample1(AgentAbstract):
                 environment=settings.ENVIRONMENT.value,
             )
 
-            # Determine next node based on whether there are tool calls
-            if response_message.tool_calls:
-                goto = "tool_call"
-            else:
-                goto = END
+            goto = "tool_call" if response_message.tool_calls else END
 
             return Command(update={"messages": [response_message]}, goto=goto)
         except Exception as e:
             logger.error(
-                "llm_call_failed_all_models",
+                "llm_call_failed",
                 session_id=config["configurable"]["thread_id"],
+                model=model_name,
                 error=str(e),
                 environment=settings.ENVIRONMENT.value,
             )
-            raise Exception(f"failed to get llm response after trying all models: {str(e)}")
+            raise
 
     async def _create_graph(self) -> StateGraph:
         try:

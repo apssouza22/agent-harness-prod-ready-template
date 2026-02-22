@@ -45,7 +45,7 @@ from src.app.agents.open_deep_research.utils import (
 from src.app.core.agentic.agent_base import AgentAbstract
 from src.app.core.common.logging import logger
 from src.app.core.common.token_limit import is_token_limit_exceeded
-from src.app.core.common.utils import get_api_key_for_model, get_today_str, execute_tool_safely
+from src.app.core.common.utils import get_api_key_for_model, get_today_str, execute_tool_safely, execute_tools
 
 
 class ResearcherAgent(AgentAbstract):
@@ -56,7 +56,7 @@ class ResearcherAgent(AgentAbstract):
     then compresses findings into a concise summary.
 
     The researcher manages its own LLM models and tools internally
-    through configurable_model, so the harness LLMService and tools
+    through configurable_model, so the harness tools
     are not used directly by the graph nodes.
     """
 
@@ -143,21 +143,7 @@ class ResearcherAgent(AgentAbstract):
             for tool in tools
         }
 
-        tool_calls = most_recent_message.tool_calls
-        tool_execution_tasks = [
-            execute_tool_safely(tools_by_name[tool_call["name"]], tool_call["args"], config)
-            for tool_call in tool_calls
-        ]
-        observations = await asyncio.gather(*tool_execution_tasks)
-
-        tool_outputs = [
-            ToolMessage(
-                content=observation,
-                name=tool_call["name"],
-                tool_call_id=tool_call["id"]
-            )
-            for observation, tool_call in zip(observations, tool_calls)
-        ]
+        tool_outputs = await execute_tools(config, most_recent_message, tools_by_name)
 
         exceeded_iterations = state.get("tool_call_iterations", 0) >= MAX_REACT_TOOL_CALLS
         research_complete_called = any(
@@ -175,6 +161,7 @@ class ResearcherAgent(AgentAbstract):
             goto="researcher",
             update={"researcher_messages": tool_outputs}
         )
+
 
     async def _compress_research_node(self, state: ResearcherState, config: RunnableConfig):
         """Compress and synthesize research findings into a concise, structured summary.

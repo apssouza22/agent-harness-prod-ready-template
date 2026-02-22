@@ -107,7 +107,7 @@ async def chat_stream(
             """
             try:
                 full_response = ""
-                with llm_stream_duration_seconds.labels(model=agent.llm_service.get_llm().get_name()).time():
+                with llm_stream_duration_seconds.labels(model=settings.DEFAULT_LLM_MODEL).time():
                     async for chunk in agent.agent_invoke_stream(
                         chat_request.messages, session.id, user_id=session.user_id
                     ):

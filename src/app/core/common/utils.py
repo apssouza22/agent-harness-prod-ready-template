@@ -1,10 +1,10 @@
-
+import asyncio
 import os
 from datetime import datetime
 
 from langchain_core.messages import (
     MessageLikeRepresentation,
-    filter_messages,
+    filter_messages, ToolMessage,
 )
 from langchain_core.runnables import RunnableConfig
 
@@ -57,3 +57,25 @@ async def execute_tool_safely(tool, args, config):
         return await tool.ainvoke(args, config)
     except Exception as e:
         return f"Error executing tool: {str(e)}"
+
+
+
+async def execute_tools(config, most_recent_message, tools_by_name):
+    """Execute tools called in the most recent message and return their outputs as ToolMessages."""
+    tool_calls = most_recent_message.tool_calls
+    if not tool_calls:
+        return []
+    tool_execution_tasks = [
+        execute_tool_safely(tools_by_name[tool_call["name"]], tool_call["args"], config)
+        for tool_call in tool_calls
+    ]
+    observations = await asyncio.gather(*tool_execution_tasks)
+    tool_outputs = [
+        ToolMessage(
+            content=observation,
+            name=tool_call["name"],
+            tool_call_id=tool_call["id"]
+        )
+        for observation, tool_call in zip(observations, tool_calls)
+    ]
+    return tool_outputs

@@ -85,7 +85,7 @@ def prepare_messages(messages: list[Message], llm: BaseChatModel, system_prompt:
             token_counter=llm,
             max_tokens=settings.MAX_TOKENS,
             start_on="human",
-            include_system=False,
+            include_system=True,
             allow_partial=False,
         )
     except ValueError as e:

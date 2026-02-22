@@ -14,7 +14,6 @@ from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
 from src.app.core.common.model.graph import GraphState
 from src.app.core.common.model.message import Message
-from src.app.core.llm.llm import LLMService
 from src.app.core.llm.llm_utils import dump_messages
 from src.app.core.mcp.session_manager import get_mcp_session_manager
 from src.app.core.mcp.mcp_utils import handle_mcp_tool_call
@@ -23,15 +22,14 @@ from src.app.init import langfuse_callback_handler
 
 
 class AgentAbstract:
-    """Example agent to demonstrate the agentic framework."""
+    """Abstract base class for all agents in the framework."""
     _graph: Optional[CompiledStateGraph] = None
 
-    def __init__(self, name, llm_service: LLMService, tools: list[BaseTool], checkpointer: AsyncPostgresSaver = None):
+    def __init__(self, name: str, agent_name: str, tools: list[BaseTool], checkpointer: AsyncPostgresSaver = None):
         self.checkpointer = checkpointer
         self.name = name
+        self.agent_name = agent_name
         self.tools = tools
-        self.llm_service = llm_service
-        self.llm_service.bind_tools(tools)
         self.tools_by_name = {tool.name: tool for tool in tools}
         self.mcp_tools_by_name = {}
         self.config = {
@@ -70,8 +68,12 @@ class AgentAbstract:
             logger.error(f"Error getting response: {str(e)}")
             return []
 
+    def _get_all_tools(self) -> list[BaseTool]:
+        """Get all available tools including MCP tools."""
+        return self.tools + list(self.mcp_tools_by_name.values())
+
     async def _load_mcp_tools(self):
-        """Load tools from persistent MCP sessions and built-in tools."""
+        """Load tools from persistent MCP sessions."""
         mcp_tools = []
 
         if settings.MCP_ENABLED:
@@ -85,12 +87,10 @@ class AgentAbstract:
             except Exception as e:
                 logger.error("mcp_tools_load_failed", error=str(e))
 
-        # Combine MCP tools with built-in tools
-        all_tools = mcp_tools + self.tools
-        self.llm_service.bind_tools(all_tools)
         self.mcp_tools_by_name = {tool.name: tool for tool in mcp_tools}
 
-        logger.info("tools_loaded", total_count=len(all_tools), mcp_count=len(mcp_tools), builtin_count=len(self.tools))
+        all_tools_count = len(mcp_tools) + len(self.tools)
+        logger.info("tools_loaded", total_count=all_tools_count, mcp_count=len(mcp_tools), builtin_count=len(self.tools))
 
     async def _create_config(self, session_id, user_id):
         config = self.config.copy()

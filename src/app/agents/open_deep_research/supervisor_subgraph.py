@@ -38,7 +38,6 @@ from src.app.core.common.utils import (
 from src.app.core.agentic.agent_base import AgentAbstract
 from src.app.core.common.logging import logger
 from src.app.core.common.token_limit import is_token_limit_exceeded
-from src.app.core.llm.llm import LLMService
 
 
 class SupervisorAgent(AgentAbstract):
@@ -49,14 +48,14 @@ class SupervisorAgent(AgentAbstract):
     a compiled researcher subgraph and coordinates the overall research process.
 
     The supervisor manages its own LLM models and tools internally
-    through configurable_model, so the harness LLMService and tools
+    through configurable_model, so the harness tools
     are not used directly by the graph nodes.
     """
 
     _graph: Optional[CompiledStateGraph] = None
 
-    def __init__(self, name: str, llm_service: LLMService, tools: list[BaseTool], checkpointer: AsyncPostgresSaver = None):
-        super().__init__(name, llm_service, tools, checkpointer)
+    def __init__(self, name: str, agent_name: str, tools: list[BaseTool], checkpointer: AsyncPostgresSaver = None):
+        super().__init__(name, agent_name, tools, checkpointer)
         self._researcher_agent: Optional[ResearcherAgent] = None
 
     def get_graph(self) -> CompiledStateGraph:

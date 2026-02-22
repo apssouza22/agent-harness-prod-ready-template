@@ -24,7 +24,6 @@ from src.app.core.common.config import Environment, settings
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
 from src.app.core.common.model.message import Message
-from src.app.core.llm.llm import LLMService
 from src.app.core.llm.llm_utils import dump_messages
 from src.app.core.memory.memory import bg_update_memory
 
@@ -39,17 +38,17 @@ class DeepResearchAgent(AgentAbstract):
     4. Generating a comprehensive final report
 
     The deep researcher manages its own LLM models and tools internally
-    through hardcoded constants, so the harness LLMService and tools
+    through hardcoded constants, so the harness tools
     are not used directly by the graph nodes.
     """
 
     _graph: Optional[CompiledStateGraph] = None
 
-    def __init__(self, name: str, llm_service: LLMService, checkpointer: AsyncPostgresSaver):
-        super().__init__(name, llm_service, [], checkpointer)
+    def __init__(self, name: str, agent_name: str, checkpointer: AsyncPostgresSaver):
+        super().__init__(name, agent_name, [], checkpointer)
         lead_researcher_tools = [tool(ConductResearch), tool(ResearchComplete), think_tool]
-        self.researcher_subagent = ResearcherAgent("Researcher", llm_service, get_all_tools(), None)
-        self.supervisor_subagent = SupervisorAgent("Supervisor", llm_service, lead_researcher_tools, None)
+        self.researcher_subagent = ResearcherAgent("Researcher", agent_name, get_all_tools(), None)
+        self.supervisor_subagent = SupervisorAgent("Supervisor", agent_name, lead_researcher_tools, None)
 
     async def _create_graph(self) -> StateGraph:
         """Build the deep research multi-subgraph workflow.

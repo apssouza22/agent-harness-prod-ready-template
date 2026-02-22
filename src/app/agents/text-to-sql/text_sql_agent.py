@@ -12,14 +12,13 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from src.app.core.agentic.agent_base import AgentAbstract
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.model.message import Message
-from src.app.core.llm.llm import LLMService
 
 
 class TextSQLDeepAgent(AgentAbstract):
     """SQL Deep Agent that can interact with a SQL database using natural language instructions."""
 
     def __init__(self, name: str, checkpointer: AsyncPostgresSaver = None):
-        super().__init__(name, LLMService("text_sql"), [], checkpointer)
+        super().__init__(name, "text_sql", [], checkpointer)
         self.agent = create_sql_deep_agent()
 
     async def agent_invoke(
