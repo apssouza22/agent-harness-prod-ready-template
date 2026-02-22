@@ -1,17 +1,19 @@
-"""Deep Research agent adapted to the project's agent harness.
+"""Deep Research agent module.
 
-This module provides the DeepResearchAgent class that extends AgentAbstract
-to integrate the multi-subgraph deep research workflow with the project's
-checkpointing, Langfuse tracing, and session management infrastructure.
+This module provides the DeepResearchAgent class that integrates the
+multi-subgraph deep research workflow with the project's checkpointing,
+Langfuse tracing, and session management infrastructure.
 """
 
-from typing import Any, Optional
+from typing import Any, AsyncGenerator, Optional
 
+from asgiref.sync import sync_to_async
 from langchain_core.messages import convert_to_openai_messages
 from langchain_core.tools import tool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.constants import START, END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
+from langgraph.types import StateSnapshot
 
 from src.app.agents.open_deep_research.deep_researcher import clarify_with_user, write_research_brief, final_report_generation
 from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgent
@@ -19,16 +21,16 @@ from src.app.agents.open_deep_research.state import AgentState, AgentInputState,
 from src.app.agents.open_deep_research.supervisor_subgraph import SupervisorAgent
 from src.app.agents.open_deep_research.utils import get_all_tools
 from src.app.agents.tools.think_tool import think_tool
-from src.app.core.agentic.agent_base import AgentAbstract
 from src.app.core.common.config import Environment, settings
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
 from src.app.core.common.model.message import Message
 from src.app.core.llm.llm_utils import dump_messages
 from src.app.core.memory.memory import bg_update_memory
+from src.app.init import langfuse_callback_handler
 
 
-class DeepResearchAgent(AgentAbstract):
+class DeepResearchAgent:
     """Deep Research agent using supervisor-researcher multi-subgraph architecture.
 
     This agent conducts multi-step research by:
@@ -42,29 +44,39 @@ class DeepResearchAgent(AgentAbstract):
     are not used directly by the graph nodes.
     """
 
-    _graph: Optional[CompiledStateGraph] = None
+    def __init__(self, name: str, checkpointer: AsyncPostgresSaver):
+        self.name = name
+        self.checkpointer = checkpointer
+        self._graph: Optional[CompiledStateGraph] = None
+        self._config = {
+            "callbacks": [langfuse_callback_handler],
+            "metadata": {
+                "environment": settings.ENVIRONMENT.value,
+                "debug": settings.DEBUG,
+            },
+        }
 
-    def __init__(self, name: str, agent_name: str, checkpointer: AsyncPostgresSaver):
-        super().__init__(name, agent_name, [], checkpointer)
         lead_researcher_tools = [tool(ConductResearch), tool(ResearchComplete), think_tool]
-        self.researcher_subagent = ResearcherAgent("Researcher", agent_name, get_all_tools(), None)
-        self.supervisor_subagent = SupervisorAgent("Supervisor", agent_name, lead_researcher_tools, None)
+        self.researcher_subagent = ResearcherAgent("Researcher", get_all_tools())
+        self.supervisor_subagent = SupervisorAgent("Supervisor", lead_researcher_tools)
 
-    async def _create_graph(self) -> StateGraph:
-        """Build the deep research multi-subgraph workflow.
-
-        Compiles the researcher and supervisor subgraphs first, then builds
-        the main deep research graph using their compiled graphs as nodes.
-
-        Returns:
-            StateGraph: The uncompiled deep research graph with all nodes and edges.
-        """
+    async def compile(self) -> CompiledStateGraph:
+        """Compile all subgraphs and the main deep research graph."""
         try:
             await self.researcher_subagent.compile()
             self.supervisor_subagent.set_researcher_agent(self.researcher_subagent)
             await self.supervisor_subagent.compile()
 
-            return self._build_deep_research_graph()
+            graph_builder = self._build_deep_research_graph()
+            self._graph = graph_builder.compile(checkpointer=self.checkpointer, name=self.name)
+
+            logger.info(
+                "graph_created",
+                graph_name=self.name,
+                environment=settings.ENVIRONMENT.value,
+                has_checkpointer=self.checkpointer is not None,
+            )
+            return self._graph
         except Exception as e:
             logger.error("deep_research_graph_creation_failed", error=str(e), environment=settings.ENVIRONMENT.value)
             raise e
@@ -77,9 +89,6 @@ class DeepResearchAgent(AgentAbstract):
     ) -> list[Message] | list[Any]:
         """Invoke the deep research agent with the given messages.
 
-        Adapts the harness invoke pattern to the deep researcher's AgentInputState
-        which only accepts messages (no long_term_memory field).
-
         Args:
             messages: The user messages to process.
             session_id: The session ID for the conversation.
@@ -88,7 +97,7 @@ class DeepResearchAgent(AgentAbstract):
         Returns:
             list[Message]: The processed response messages.
         """
-        config = await self._create_config(session_id, user_id)
+        config = self._build_invoke_config(session_id, user_id)
 
         try:
             response = await self._graph.ainvoke(
@@ -96,7 +105,6 @@ class DeepResearchAgent(AgentAbstract):
                 config=config,
             )
 
-            # Update long-term memory in background
             if response.get("messages"):
                 bg_update_memory(user_id, convert_to_openai_messages(response["messages"]), config["metadata"])
 
@@ -108,16 +116,50 @@ class DeepResearchAgent(AgentAbstract):
             logger.exception("deep_research_invoke_failed", session_id=session_id, error=str(e))
             return []
 
+    async def agent_invoke_stream(
+        self, messages: list[Message], session_id: str, user_id: Optional[int] = None
+    ) -> AsyncGenerator[str, None]:
+        """Stream the deep research agent response token by token.
+
+        Args:
+            messages: The messages to send to the agent.
+            session_id: The session ID for the conversation.
+            user_id: The user ID for the conversation.
+
+        Yields:
+            str: Tokens of the agent response.
+        """
+        config = self._build_invoke_config(session_id, user_id)
+
+        try:
+            async for token, _ in self._graph.astream(
+                {"messages": dump_messages(messages)},
+                config,
+                stream_mode="messages",
+            ):
+                try:
+                    yield token.content
+                except Exception as token_error:
+                    logger.error("error_processing_token", error=str(token_error), session_id=session_id)
+                    continue
+
+            state: StateSnapshot = await sync_to_async(self._graph.get_state)(config=config)
+            if state.values and "messages" in state.values:
+                bg_update_memory(user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"])
+
+        except Exception as stream_error:
+            logger.error("deep_research_stream_failed", error=str(stream_error), session_id=session_id)
+            raise stream_error
+
+    def _build_invoke_config(self, session_id: str, user_id: Optional[int] = None) -> dict:
+        config = self._config.copy()
+        config["configurable"] = {"thread_id": session_id}
+        config["metadata"]["user_id"] = user_id
+        config["metadata"]["session_id"] = session_id
+        return config
 
     def _build_deep_research_graph(self) -> StateGraph:
         """Build the complete deep research workflow graph (uncompiled).
-
-        Creates the main deep research StateGraph with all nodes and edges.
-        The subgraphs (supervisor, researcher) are compiled by the DeepResearchAgent
-        and the supervisor's compiled graph is passed in as a parameter.
-
-        Args:
-            supervisor_agent: The compiled supervisor subgraph to embed as a node.
 
         Returns:
             StateGraph: The uncompiled deep research graph builder.

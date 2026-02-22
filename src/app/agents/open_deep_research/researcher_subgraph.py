@@ -1,20 +1,19 @@
-"""Researcher subgraph extending AgentAbstract.
+"""Researcher subgraph for the Deep Research agent.
 
-This module provides the ResearcherSubgraph class that wraps the individual
-researcher workflow (research, tool execution, compression) in the project's
-AgentAbstract class structure.
+This module provides the ResearcherAgent class that wraps the individual
+researcher workflow (research, tool execution, compression) as a standalone
+LangGraph subgraph.
 """
 
-import asyncio
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
-    ToolMessage,
     filter_messages,
 )
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool
 from langgraph.constants import START, END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Command
@@ -42,13 +41,13 @@ from src.app.agents.open_deep_research.utils import (
     openai_websearch_called,
     remove_up_to_last_ai_message,
 )
-from src.app.core.agentic.agent_base import AgentAbstract
+from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.common.token_limit import is_token_limit_exceeded
-from src.app.core.common.utils import get_api_key_for_model, get_today_str, execute_tool_safely, execute_tools
+from src.app.core.common.utils import get_api_key_for_model, get_today_str, execute_tools
 
 
-class ResearcherAgent(AgentAbstract):
+class ResearcherAgent:
     """Individual researcher subgraph that conducts focused research on specific topics.
 
     This subgraph is given a specific research topic by the supervisor and uses
@@ -60,7 +59,20 @@ class ResearcherAgent(AgentAbstract):
     are not used directly by the graph nodes.
     """
 
-    _graph: Optional[CompiledStateGraph] = None
+    def __init__(self, name: str, tools: list[BaseTool]):
+        self.name = name
+        self.tools = tools
+        self._graph: Optional[CompiledStateGraph] = None
+
+    async def compile(self) -> CompiledStateGraph:
+        graph_builder = await self._create_graph()
+        self._graph = graph_builder.compile(name=self.name)
+        logger.info("graph_created", graph_name=self.name, environment=settings.ENVIRONMENT.value)
+        return self._graph
+
+    async def agent_invoke(self, agent_input: dict[str, Any], session_id: str, user_id: Optional[int] = None) -> dict[str, Any]:
+        """Invoke the researcher graph and return the raw output dict."""
+        return await self._graph.ainvoke(input=agent_input)
 
 
     async def _researcher_node(self, state: ResearcherState, config: RunnableConfig) -> Command[Literal["researcher_tools"]]:
@@ -193,7 +205,7 @@ class ResearcherAgent(AgentAbstract):
                 compression_prompt = compress_research_system_prompt.format(date=get_today_str())
                 messages = [SystemMessage(content=compression_prompt)] + researcher_messages
 
-                response = await synthesizer_model.ainvoke(messages)
+                response = await synthesizer_model.ainvoke(messages, config)
 
                 raw_notes_content = "\n".join([
                     str(message.content)

@@ -2,8 +2,7 @@
 
 This module provides the top-level node functions used by the main deep research
 graph: clarification, research brief generation, and final report generation.
-Subgraph logic (supervisor, researcher) has been extracted into dedicated classes
-extending AgentAbstract.
+Subgraph logic (supervisor, researcher) lives in dedicated standalone classes.
 """
 
 from typing import Literal

@@ -1,8 +1,8 @@
-"""Supervisor subgraph extending AgentAbstract.
+"""Supervisor subgraph for the Deep Research agent.
 
-This module provides the SupervisorSubgraph class that wraps the research
-supervisor workflow (planning, delegation, tool execution) in the project's
-AgentAbstract class structure.
+This module provides the SupervisorAgent class that wraps the research
+supervisor workflow (planning, delegation, tool execution) as a standalone
+LangGraph subgraph.
 """
 
 import asyncio
@@ -14,7 +14,6 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.constants import START, END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Command
@@ -31,16 +30,16 @@ from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgen
 from src.app.agents.open_deep_research.state import (
     SupervisorState,
 )
+from src.app.core.common.config import settings
 from src.app.core.common.utils import (
     get_api_key_for_model,
     get_notes_from_tool_calls,
 )
-from src.app.core.agentic.agent_base import AgentAbstract
 from src.app.core.common.logging import logger
 from src.app.core.common.token_limit import is_token_limit_exceeded
 
 
-class SupervisorAgent(AgentAbstract):
+class SupervisorAgent:
     """Lead research supervisor subgraph that plans and delegates research tasks.
 
     The supervisor analyzes the research brief and decides how to break down
@@ -52,11 +51,17 @@ class SupervisorAgent(AgentAbstract):
     are not used directly by the graph nodes.
     """
 
-    _graph: Optional[CompiledStateGraph] = None
-
-    def __init__(self, name: str, agent_name: str, tools: list[BaseTool], checkpointer: AsyncPostgresSaver = None):
-        super().__init__(name, agent_name, tools, checkpointer)
+    def __init__(self, name: str, tools: list[BaseTool]):
+        self.name = name
+        self.tools = tools
+        self._graph: Optional[CompiledStateGraph] = None
         self._researcher_agent: Optional[ResearcherAgent] = None
+
+    async def compile(self) -> CompiledStateGraph:
+        graph_builder = await self._create_graph()
+        self._graph = graph_builder.compile(name=self.name)
+        logger.info("graph_created", graph_name=self.name, environment=settings.ENVIRONMENT.value)
+        return self._graph
 
     def get_graph(self) -> CompiledStateGraph:
         """Get the compiled supervisor graph instance.
