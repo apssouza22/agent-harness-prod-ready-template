@@ -31,7 +31,7 @@ from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgen
 from src.app.agents.open_deep_research.state import (
     SupervisorState,
 )
-from src.app.agents.open_deep_research.utils import (
+from src.app.core.common.utils import (
     get_api_key_for_model,
     get_notes_from_tool_calls,
 )

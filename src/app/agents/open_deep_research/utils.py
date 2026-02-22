@@ -1,14 +1,9 @@
 """Utility functions and helpers for the Deep Research agent."""
 
-import os
-from datetime import datetime
-
 from langchain_core.messages import (
     AIMessage,
     MessageLikeRepresentation,
-    filter_messages,
 )
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from src.app.agents.open_deep_research.config import (
@@ -29,10 +24,6 @@ def get_all_tools():
     search_tools = get_search_tool(SEARCH_API)
     tools.extend(search_tools)
     return tools
-
-def get_notes_from_tool_calls(messages: list[MessageLikeRepresentation]):
-    """Extract notes from tool call messages."""
-    return [tool_msg.content for tool_msg in filter_messages(messages, include_types="tool")]
 
 ##########################
 # Model Provider Native Websearch Utils
@@ -110,40 +101,3 @@ def remove_up_to_last_ai_message(messages: list[MessageLikeRepresentation]) -> l
     
     # No AI messages found, return original list
     return messages
-
-##########################
-# Misc Utils
-##########################
-
-def get_today_str() -> str:
-    """Get current date formatted for display in prompts and outputs.
-    
-    Returns:
-        Human-readable date string in format like 'Mon Jan 15, 2024'
-    """
-    now = datetime.now()
-    return f"{now:%a} {now:%b} {now.day}, {now:%Y}"
-
-def get_api_key_for_model(model_name: str, config: RunnableConfig):
-    """Get API key for a specific model from environment or config."""
-    should_get_from_config = os.getenv("GET_API_KEYS_FROM_CONFIG", "false")
-    model_name = model_name.lower()
-    if should_get_from_config.lower() == "true":
-        api_keys = config.get("configurable", {}).get("apiKeys", {})
-        if not api_keys:
-            return None
-        if model_name.startswith("openai:"):
-            return api_keys.get("OPENAI_API_KEY")
-        elif model_name.startswith("anthropic:"):
-            return api_keys.get("ANTHROPIC_API_KEY")
-        elif model_name.startswith("google"):
-            return api_keys.get("GOOGLE_API_KEY")
-        return None
-    else:
-        if model_name.startswith("openai:"): 
-            return os.getenv("OPENAI_API_KEY")
-        elif model_name.startswith("anthropic:"):
-            return os.getenv("ANTHROPIC_API_KEY")
-        elif model_name.startswith("google"):
-            return os.getenv("GOOGLE_API_KEY")
-        return None

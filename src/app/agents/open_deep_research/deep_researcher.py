@@ -39,7 +39,7 @@ from src.app.agents.open_deep_research.state import (
     ClarifyWithUser,
     ResearchQuestion,
 )
-from src.app.agents.open_deep_research.utils import (
+from src.app.core.common.utils import (
     get_api_key_for_model,
     get_today_str,
 )
