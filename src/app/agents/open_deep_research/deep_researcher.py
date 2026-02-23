@@ -19,13 +19,9 @@ from langgraph.types import Command
 
 from src.app.agents.open_deep_research.config import (
     FINAL_REPORT_MODEL,
-    FINAL_REPORT_MODEL_MAX_TOKENS,
     MAX_CONCURRENT_RESEARCH_UNITS,
     MAX_RESEARCHER_ITERATIONS,
-    MAX_STRUCTURED_OUTPUT_RETRIES,
-    RESEARCH_MODEL,
-    RESEARCH_MODEL_MAX_TOKENS,
-    configurable_model,
+    research_brief_model, clarification_model,
 )
 from src.app.agents.open_deep_research.prompts import (
     clarify_with_user_instructions,
@@ -35,14 +31,11 @@ from src.app.agents.open_deep_research.prompts import (
 )
 from src.app.agents.open_deep_research.state import (
     AgentState,
-    ClarifyWithUser,
-    ResearchQuestion,
-)
-from src.app.core.common.utils import (
-    get_api_key_for_model,
-    get_today_str,
 )
 from src.app.core.common.token_limit import is_token_limit_exceeded, get_model_token_limit
+from src.app.core.common.utils import (
+    get_today_str,
+)
 
 
 async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Command[Literal["write_research_brief", "__end__"]]:
@@ -59,19 +52,7 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Comman
         Command to either end with a clarifying question or proceed to research brief
     """
     messages = state["messages"]
-    model_config = {
-        "model": RESEARCH_MODEL,
-        "max_tokens": RESEARCH_MODEL_MAX_TOKENS,
-        "api_key": get_api_key_for_model(RESEARCH_MODEL, config),
-        "tags": ["langsmith:nostream"]
-    }
 
-    clarification_model = (
-        configurable_model
-        .with_structured_output(ClarifyWithUser)
-        .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
-        .with_config(model_config)
-    )
 
     prompt_content = clarify_with_user_instructions.format(
         messages=get_buffer_string(messages),
@@ -105,25 +86,13 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
     Returns:
         Command to proceed to research supervisor with initialized context
     """
-    research_model_config = {
-        "model": RESEARCH_MODEL,
-        "max_tokens": RESEARCH_MODEL_MAX_TOKENS,
-        "api_key": get_api_key_for_model(RESEARCH_MODEL, config),
-        "tags": ["langsmith:nostream"]
-    }
 
-    research_model = (
-        configurable_model
-        .with_structured_output(ResearchQuestion)
-        .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
-        .with_config(research_model_config)
-    )
 
     prompt_content = transform_messages_into_research_topic_prompt.format(
         messages=get_buffer_string(state.get("messages", [])),
         date=get_today_str()
     )
-    response = await research_model.ainvoke([HumanMessage(content=prompt_content)])
+    response = await research_brief_model.ainvoke([HumanMessage(content=prompt_content)])
 
     supervisor_system_prompt = lead_researcher_prompt.format(
         date=get_today_str(),
@@ -163,12 +132,6 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
     cleared_state = {"notes": {"type": "override", "value": []}}
     findings = "\n".join(notes)
 
-    writer_model_config = {
-        "model": FINAL_REPORT_MODEL,
-        "max_tokens": FINAL_REPORT_MODEL_MAX_TOKENS,
-        "api_key": get_api_key_for_model(FINAL_REPORT_MODEL, config),
-        "tags": ["langsmith:nostream"]
-    }
 
     max_retries = 3
     current_retry = 0
@@ -183,7 +146,7 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
                 date=get_today_str()
             )
 
-            final_report = await configurable_model.with_config(writer_model_config).ainvoke([
+            final_report = await final_report_model.ainvoke([
                 HumanMessage(content=final_report_prompt)
             ])
 

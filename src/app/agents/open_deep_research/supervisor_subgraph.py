@@ -21,22 +21,19 @@ from langgraph.types import Command
 from src.app.agents.open_deep_research.config import (
     MAX_CONCURRENT_RESEARCH_UNITS,
     MAX_RESEARCHER_ITERATIONS,
-    MAX_STRUCTURED_OUTPUT_RETRIES,
     RESEARCH_MODEL,
-    RESEARCH_MODEL_MAX_TOKENS,
-    configurable_model,
+    supervisor_model,
 )
 from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgent
 from src.app.agents.open_deep_research.state import (
     SupervisorState,
 )
 from src.app.core.common.config import settings
-from src.app.core.common.utils import (
-    get_api_key_for_model,
-    get_notes_from_tool_calls,
-)
 from src.app.core.common.logging import logger
 from src.app.core.common.token_limit import is_token_limit_exceeded
+from src.app.core.common.utils import (
+    get_notes_from_tool_calls,
+)
 
 
 class SupervisorAgent:
@@ -96,21 +93,10 @@ class SupervisorAgent:
             Command to proceed to supervisor_tools for tool execution
         """
         logger.info("node_start", node="_supervisor_node")
-        research_model_config = {
-            "model": RESEARCH_MODEL,
-            "max_tokens": RESEARCH_MODEL_MAX_TOKENS,
-            "api_key": get_api_key_for_model(RESEARCH_MODEL, config),
-        }
-
-        research_model = (
-            configurable_model
-            .bind_tools(self.tools)
-            .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
-            .with_config(research_model_config)
-        )
 
         supervisor_messages = state.get("supervisor_messages", [])
-        response = await research_model.ainvoke(supervisor_messages)
+        supervisor_model.tools(self.tools)
+        response = await supervisor_model.ainvoke(supervisor_messages)
 
         return Command(
             goto="supervisor_tools",

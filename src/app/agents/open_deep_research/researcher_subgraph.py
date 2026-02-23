@@ -22,10 +22,8 @@ from src.app.agents.open_deep_research.config import (
     COMPRESSION_MODEL,
     COMPRESSION_MODEL_MAX_TOKENS,
     MAX_REACT_TOOL_CALLS,
-    MAX_STRUCTURED_OUTPUT_RETRIES,
     RESEARCH_MODEL,
-    RESEARCH_MODEL_MAX_TOKENS,
-    configurable_model,
+    researcher_model, synthesizer_model,
 )
 from src.app.agents.open_deep_research.prompts import (
     compress_research_simple_human_message,
@@ -53,10 +51,6 @@ class ResearcherAgent:
     This subgraph is given a specific research topic by the supervisor and uses
     available tools (search, think_tool) to gather comprehensive information,
     then compresses findings into a concise summary.
-
-    The researcher manages its own LLM models and tools internally
-    through configurable_model, so the harness tools
-    are not used directly by the graph nodes.
     """
 
     def __init__(self, name: str, tools: list[BaseTool]):
@@ -98,24 +92,11 @@ class ResearcherAgent:
                 "No tools found to conduct research: Please configure your search API."
             )
 
-        research_model_config = {
-            "model": RESEARCH_MODEL,
-            "max_tokens": RESEARCH_MODEL_MAX_TOKENS,
-            "api_key": get_api_key_for_model(RESEARCH_MODEL, config),
-            "tags": ["langsmith:nostream"]
-        }
 
         researcher_prompt = research_system_prompt.format(date=get_today_str())
-
-        research_model = (
-            configurable_model
-            .bind_tools(tools)
-            .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
-            .with_config(research_model_config)
-        )
-
         messages = [SystemMessage(content=researcher_prompt)] + researcher_messages
-        response = await research_model.ainvoke(messages)
+        researcher_model.bind_tools(tools)
+        response = await researcher_model.ainvoke(messages, config)
 
         return Command(
             goto="researcher_tools",
@@ -186,13 +167,7 @@ class ResearcherAgent:
             Dictionary containing compressed research summary and raw notes
         """
         logger.info("node_start", node="_compress_research_node", tool_call_iterations=state.get("tool_call_iterations", 0))
-        model_config = {
-            "model": COMPRESSION_MODEL,
-            "max_tokens": COMPRESSION_MODEL_MAX_TOKENS,
-            "api_key": get_api_key_for_model(COMPRESSION_MODEL, config),
-            "tags": ["langsmith:nostream"]
-        }
-        synthesizer_model = configurable_model.with_config(model_config)
+
 
         researcher_messages = state.get("researcher_messages", [])
         researcher_messages.append(HumanMessage(content=compress_research_simple_human_message))
