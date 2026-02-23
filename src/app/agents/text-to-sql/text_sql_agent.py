@@ -1,4 +1,3 @@
-import asyncio
 import os
 from typing import Any, Optional
 
@@ -7,18 +6,18 @@ from deepagents.backends import FilesystemBackend
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from src.app.core.agentic.agent_base import AgentAbstract
+from src.app.core.common.config import settings
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.model.message import Message
+from src.app.init import langfuse_callback_handler
 
 
-class TextSQLDeepAgent(AgentAbstract):
+class TextSQLDeepAgent:
     """SQL Deep Agent that can interact with a SQL database using natural language instructions."""
 
-    def __init__(self, name: str, checkpointer: AsyncPostgresSaver = None):
-        super().__init__(name, "text_sql", [], checkpointer)
+    def __init__(self, name: str):
+        self.name = name
         self.agent = create_sql_deep_agent()
 
     async def agent_invoke(
@@ -28,9 +27,18 @@ class TextSQLDeepAgent(AgentAbstract):
         user_id: Optional[int] = None,
     ) -> list[Message] | list[Any]:
         """Invoke the SQL Deep Agent with the given input and return its response."""
-        config = await self._create_config(session_id, user_id)
+        config = {
+            "callbacks": [langfuse_callback_handler],
+            "configurable": {"thread_id": session_id},
+            "metadata": {
+                "environment": settings.ENVIRONMENT.value,
+                "debug": settings.DEBUG,
+                "user_id": user_id,
+                "session_id": session_id,
+            },
+        }
 
-        response =  await self.agent.ainvoke({
+        response = await self.agent.ainvoke({
             "messages": [{"role": "user", "content": agent_input.get("query", "")}]
         }, config=config)
         return process_messages(response["messages"])

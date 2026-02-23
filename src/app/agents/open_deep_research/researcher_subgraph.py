@@ -42,7 +42,7 @@ from src.app.agents.open_deep_research.utils import (
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.common.token_limit import is_token_limit_exceeded
-from src.app.core.common.utils import get_api_key_for_model, get_today_str, execute_tools
+from src.app.core.common.utils import get_today_str, execute_tools
 
 
 class ResearcherAgent:
