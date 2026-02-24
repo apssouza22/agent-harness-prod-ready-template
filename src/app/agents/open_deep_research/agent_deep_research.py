@@ -111,7 +111,7 @@ class DeepResearchAgent:
             return process_messages(response["messages"])
 
         except Exception as e:
-            record_llm_error("deep_research")
+            record_llm_error("deep_research", self.name)
             if settings.ENVIRONMENT == Environment.DEVELOPMENT:
                 raise e
             logger.exception("deep_research_invoke_failed", session_id=session_id, error=str(e))
@@ -149,7 +149,7 @@ class DeepResearchAgent:
                 bg_update_memory(user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"])
 
         except Exception as stream_error:
-            record_llm_error("deep_research")
+            record_llm_error("deep_research", self.name)
             logger.error("deep_research_stream_failed", error=str(stream_error), session_id=session_id)
             raise stream_error
 

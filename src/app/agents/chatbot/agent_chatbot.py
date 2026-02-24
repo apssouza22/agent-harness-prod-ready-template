@@ -13,7 +13,7 @@ from langgraph.types import RunnableConfig, Command, StateSnapshot
 from src.app.core.common.config import settings, Environment
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
-from src.app.core.metrics.metrics import llm_inference_duration_seconds
+from src.app.core.metrics.metrics import llm_inference_duration_seconds, tool_executions_total
 from src.app.core.common.model.graph import GraphState
 from src.app.core.common.model.message import Message
 from src.app.core.llm.llm import LLMRegistry
@@ -119,7 +119,7 @@ class AgentChatbot:
                 bg_update_memory(user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"])
 
         except Exception as stream_error:
-            record_llm_error(settings.DEFAULT_LLM_MODEL)
+            record_llm_error(settings.DEFAULT_LLM_MODEL, self.name)
             logger.error("stream_processing_failed", error=str(stream_error), session_id=session_id)
             raise stream_error
 
@@ -182,7 +182,12 @@ class AgentChatbot:
                 tool_name = tool_call["name"]
 
                 if tool_name in self.tools_by_name:
-                    tool_result = await self.tools_by_name[tool_name].ainvoke(tool_call["args"])
+                    try:
+                        tool_result = await self.tools_by_name[tool_name].ainvoke(tool_call["args"])
+                        tool_executions_total.labels(tool_name=tool_name, status="success").inc()
+                    except Exception as tool_error:
+                        tool_executions_total.labels(tool_name=tool_name, status="error").inc()
+                        raise tool_error
                     outputs.append(
                         ToolMessage(
                             content=tool_result,
@@ -229,10 +234,10 @@ class AgentChatbot:
         )
 
         try:
-            with llm_inference_duration_seconds.labels(model=model_name).time():
+            with llm_inference_duration_seconds.labels(model=model_name, agent_name=self.name).time():
                 response_message = await model.ainvoke(dump_messages(messages), config)
 
-            record_token_usage(response_message, model_name)
+            record_token_usage(response_message, model_name, self.name)
             response_message = process_llm_response(response_message)
             logger.info(
                 "llm_response_generated",
@@ -245,7 +250,7 @@ class AgentChatbot:
 
             return Command(update={"messages": [response_message]}, goto=goto)
         except Exception as e:
-            record_llm_error(model_name)
+            record_llm_error(model_name, self.name)
             logger.error(
                 "llm_call_failed",
                 session_id=config["configurable"]["thread_id"],

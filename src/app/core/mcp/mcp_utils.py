@@ -7,6 +7,7 @@ from langchain_core.messages import ToolMessage
 
 from src.app.core.common.logging import bind_context, logger
 from src.app.core.mcp.session_manager import generate_correlation_id, get_mcp_session_manager
+from src.app.core.metrics.metrics import tool_executions_total
 
 
 async def handle_mcp_tool_call(
@@ -50,6 +51,7 @@ async def handle_mcp_tool_call(
     for attempt in range(max_retries + 1):
         try:
             tool_result = await tool_fn.ainvoke(tool_call["args"])
+            tool_executions_total.labels(tool_name=tool_name, status="success").inc()
             logger.info(
                 "mcp_tool_call_successful",
                 correlation_id=correlation_id,
@@ -107,6 +109,7 @@ async def handle_mcp_tool_call(
                 attempt=attempt + 1,
             )
 
+            tool_executions_total.labels(tool_name=tool_name, status="error").inc()
             error_msg = f"[ERROR] Tool '{tool_name}' failed: {str(tool_error)}"
             if isinstance(tool_error, ClosedResourceError):
                 error_msg += " (MCP connection issue. Attempted reconnection.)"

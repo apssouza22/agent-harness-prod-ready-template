@@ -18,6 +18,7 @@ from langgraph.constants import END
 from langgraph.types import Command
 
 from src.app.agents.open_deep_research.config import (
+    DEEP_RESEARCH_AGENT_NAME,
     FINAL_REPORT_MODEL,
     MAX_CONCURRENT_RESEARCH_UNITS,
     MAX_RESEARCHER_ITERATIONS,
@@ -61,7 +62,7 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Comman
         messages=get_buffer_string(messages),
         date=get_today_str()
     )
-    with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL).time():
+    with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL, agent_name=DEEP_RESEARCH_AGENT_NAME).time():
         response = await clarification_model.ainvoke([HumanMessage(content=prompt_content)])
 
     if response.need_clarification:
@@ -96,7 +97,7 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
         messages=get_buffer_string(state.get("messages", [])),
         date=get_today_str()
     )
-    with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL).time():
+    with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL, agent_name=DEEP_RESEARCH_AGENT_NAME).time():
         response = await research_brief_model.ainvoke([HumanMessage(content=prompt_content)])
 
     supervisor_system_prompt = lead_researcher_prompt.format(
@@ -151,12 +152,12 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
                 date=get_today_str()
             )
 
-            with llm_inference_duration_seconds.labels(model=FINAL_REPORT_MODEL).time():
+            with llm_inference_duration_seconds.labels(model=FINAL_REPORT_MODEL, agent_name=DEEP_RESEARCH_AGENT_NAME).time():
                 final_report = await final_report_model.ainvoke([
                     HumanMessage(content=final_report_prompt)
                 ])
 
-            record_token_usage(final_report, FINAL_REPORT_MODEL)
+            record_token_usage(final_report, FINAL_REPORT_MODEL, DEEP_RESEARCH_AGENT_NAME)
             return {
                 "final_report": final_report.content,
                 "messages": [final_report],
@@ -164,7 +165,7 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
             }
 
         except Exception as e:
-            record_llm_error(FINAL_REPORT_MODEL)
+            record_llm_error(FINAL_REPORT_MODEL, DEEP_RESEARCH_AGENT_NAME)
             if is_token_limit_exceeded(e, FINAL_REPORT_MODEL):
                 current_retry += 1
 

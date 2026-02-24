@@ -35,7 +35,7 @@ from src.app.core.common.utils import (
     get_notes_from_tool_calls,
 )
 from src.app.core.llm.llm_utils import record_token_usage, record_llm_error
-from src.app.core.metrics.metrics import llm_inference_duration_seconds
+from src.app.core.metrics.metrics import llm_inference_duration_seconds, tool_executions_total
 
 
 class SupervisorAgent:
@@ -98,10 +98,10 @@ class SupervisorAgent:
 
         supervisor_messages = state.get("supervisor_messages", [])
         supervisor_model.tools(self.tools)
-        with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL).time():
+        with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL, agent_name=self.name).time():
             response = await supervisor_model.ainvoke(supervisor_messages)
 
-        record_token_usage(response, RESEARCH_MODEL)
+        record_token_usage(response, RESEARCH_MODEL, self.name)
         return Command(
             goto="supervisor_tools",
             update={
@@ -154,6 +154,7 @@ class SupervisorAgent:
 
         for tool_call in think_tool_calls:
             reflection_content = tool_call["args"]["reflection"]
+            tool_executions_total.labels(tool_name="think_tool", status="success").inc()
             all_tool_messages.append(ToolMessage(
                 content=f"Reflection recorded: {reflection_content}",
                 name="think_tool",
@@ -222,6 +223,7 @@ class SupervisorAgent:
         tool_results = await asyncio.gather(*research_tasks)
 
         for observation, tool_call in zip(tool_results, allowed_conduct_research_calls):
+            tool_executions_total.labels(tool_name="ConductResearch", status="success").inc()
             all_tool_messages.append(ToolMessage(
                 content=observation.get("compressed_research", "Error synthesizing research report: Maximum retries exceeded"),
                 name=tool_call["name"],
@@ -229,6 +231,7 @@ class SupervisorAgent:
             ))
 
         for overflow_call in overflow_conduct_research_calls:
+            tool_executions_total.labels(tool_name="ConductResearch", status="error").inc()
             all_tool_messages.append(ToolMessage(
                 content=f"Error: Did not run this research as you have already exceeded the maximum number of concurrent research units. Please try again with {MAX_CONCURRENT_RESEARCH_UNITS} or fewer research units.",
                 name="ConductResearch",

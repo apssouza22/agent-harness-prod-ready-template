@@ -1,20 +1,49 @@
 {
   "id": null,
   "uid": "llm-latency",
-  "title": "LLM Inference Latency",
-  "tags": ["inference", "latency"],
+  "title": "LLM Observability",
+  "tags": ["inference", "latency", "tokens", "errors", "tools"],
   "timezone": "browser",
   "schemaVersion": 30,
-  "version": 3,
+  "version": 6,
   "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "agent_name",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(llm_inference_duration_seconds_count, agent_name)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "label": "Agent"
+      }
+    ]
+  },
   "panels": [
+    {
+      "type": "row",
+      "title": "Latency",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }
+    },
     {
       "type": "graph",
       "title": "LLM Inference Duration (p95)",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, rate(llm_inference_duration_seconds_bucket[1m]))",
-          "legendFormat": "{{model}} (chat)",
+          "expr": "histogram_quantile(0.95, rate(llm_inference_duration_seconds_bucket{agent_name=~\"$agent_name\"}[1m]))",
+          "legendFormat": "{{model}} / {{agent_name}}",
           "refId": "A"
         }
       ],
@@ -22,15 +51,15 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 9 }
+      "gridPos": { "x": 0, "y": 1, "w": 12, "h": 9 }
     },
     {
       "type": "graph",
       "title": "LLM Stream Inference Duration (p95)",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, rate(llm_stream_duration_seconds_bucket[1m]))",
-          "legendFormat": "{{model}} (stream)",
+          "expr": "histogram_quantile(0.95, rate(llm_stream_duration_seconds_bucket{agent_name=~\"$agent_name\"}[1m]))",
+          "legendFormat": "{{model}} / {{agent_name}}",
           "refId": "B"
         }
       ],
@@ -38,15 +67,15 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "gridPos": { "x": 0, "y": 9, "w": 24, "h": 9 }
+      "gridPos": { "x": 12, "y": 1, "w": 12, "h": 9 }
     },
     {
       "type": "graph",
       "title": "LLM Inference Duration (Average)",
       "targets": [
         {
-          "expr": "rate(llm_inference_duration_seconds_sum[1m]) / rate(llm_inference_duration_seconds_count[1m])",
-          "legendFormat": "{{model}} (avg)",
+          "expr": "rate(llm_inference_duration_seconds_sum{agent_name=~\"$agent_name\"}[1m]) / rate(llm_inference_duration_seconds_count{agent_name=~\"$agent_name\"}[1m])",
+          "legendFormat": "{{model}} / {{agent_name}}",
           "refId": "C"
         }
       ],
@@ -54,15 +83,15 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "gridPos": { "x": 0, "y": 18, "w": 24, "h": 9 }
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 9 }
     },
     {
       "type": "graph",
-      "title": "LLM Inference Request Count",
+      "title": "LLM Inference Request Rate",
       "targets": [
         {
-          "expr": "rate(llm_inference_duration_seconds_count[1m])",
-          "legendFormat": "{{model}}",
+          "expr": "rate(llm_inference_duration_seconds_count{agent_name=~\"$agent_name\"}[1m])",
+          "legendFormat": "{{model}} / {{agent_name}}",
           "refId": "D"
         }
       ],
@@ -70,7 +99,426 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "gridPos": { "x": 0, "y": 27, "w": 24, "h": 9 }
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 9 }
+    },
+    {
+      "type": "row",
+      "title": "Token Usage",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 19, "w": 24, "h": 1 }
+    },
+    {
+      "type": "stat",
+      "title": "Total Input Tokens",
+      "targets": [
+        {
+          "expr": "sum(llm_tokens_in{agent_name=~\"$agent_name\"})",
+          "legendFormat": "input tokens",
+          "refId": "E"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 500000 },
+              { "color": "red", "value": 1000000 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "gridPos": { "x": 0, "y": 20, "w": 6, "h": 5 }
+    },
+    {
+      "type": "stat",
+      "title": "Total Output Tokens",
+      "targets": [
+        {
+          "expr": "sum(llm_tokens_out{agent_name=~\"$agent_name\"})",
+          "legendFormat": "output tokens",
+          "refId": "F"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 250000 },
+              { "color": "red", "value": 500000 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "gridPos": { "x": 6, "y": 20, "w": 6, "h": 5 }
+    },
+    {
+      "type": "gauge",
+      "title": "Output / Input Token Ratio",
+      "targets": [
+        {
+          "expr": "sum(llm_tokens_out{agent_name=~\"$agent_name\"}) / sum(llm_tokens_in{agent_name=~\"$agent_name\"})",
+          "legendFormat": "ratio",
+          "refId": "G"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "min": 0,
+          "max": 5,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 2 },
+              { "color": "red", "value": 4 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "gridPos": { "x": 12, "y": 20, "w": 6, "h": 5 }
+    },
+    {
+      "type": "stat",
+      "title": "Total Tokens (In + Out)",
+      "targets": [
+        {
+          "expr": "sum(llm_tokens_in{agent_name=~\"$agent_name\"}) + sum(llm_tokens_out{agent_name=~\"$agent_name\"})",
+          "legendFormat": "total",
+          "refId": "H"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 750000 },
+              { "color": "red", "value": 1500000 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "gridPos": { "x": 18, "y": 20, "w": 6, "h": 5 }
+    },
+    {
+      "type": "graph",
+      "title": "Token Throughput (tokens/min)",
+      "targets": [
+        {
+          "expr": "sum by (agent_name) (rate(llm_tokens_in{agent_name=~\"$agent_name\"}[1m])) * 60",
+          "legendFormat": "{{agent_name}} input/min",
+          "refId": "I"
+        },
+        {
+          "expr": "sum by (agent_name) (rate(llm_tokens_out{agent_name=~\"$agent_name\"}[1m])) * 60",
+          "legendFormat": "{{agent_name}} output/min",
+          "refId": "J"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "x": 0, "y": 25, "w": 24, "h": 9 }
+    },
+    {
+      "type": "row",
+      "title": "Errors",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 34, "w": 24, "h": 1 }
+    },
+    {
+      "type": "stat",
+      "title": "Total LLM Errors",
+      "targets": [
+        {
+          "expr": "sum(llm_errors{agent_name=~\"$agent_name\"})",
+          "legendFormat": "errors",
+          "refId": "K"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "gridPos": { "x": 0, "y": 35, "w": 6, "h": 5 }
+    },
+    {
+      "type": "stat",
+      "title": "Error Rate (errors/min)",
+      "targets": [
+        {
+          "expr": "sum(rate(llm_errors{agent_name=~\"$agent_name\"}[1m])) * 60",
+          "legendFormat": "errors/min",
+          "refId": "L"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "gridPos": { "x": 6, "y": 35, "w": 6, "h": 5 }
+    },
+    {
+      "type": "graph",
+      "title": "LLM Error Rate Over Time",
+      "targets": [
+        {
+          "expr": "sum by (agent_name) (rate(llm_errors{agent_name=~\"$agent_name\"}[1m])) * 60",
+          "legendFormat": "{{agent_name}} errors/min",
+          "refId": "M"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "x": 12, "y": 35, "w": 12, "h": 9 }
+    },
+    {
+      "type": "row",
+      "title": "Tool Executions",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 44, "w": 24, "h": 1 }
+    },
+    {
+      "type": "stat",
+      "title": "Total Tool Executions",
+      "targets": [
+        {
+          "expr": "sum(tool_executions_total)",
+          "legendFormat": "total",
+          "refId": "N"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "gridPos": { "x": 0, "y": 45, "w": 6, "h": 5 }
+    },
+    {
+      "type": "stat",
+      "title": "Tool Errors",
+      "targets": [
+        {
+          "expr": "sum(tool_executions_total{status=\"error\"})",
+          "legendFormat": "errors",
+          "refId": "O"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "gridPos": { "x": 6, "y": 45, "w": 6, "h": 5 }
+    },
+    {
+      "type": "gauge",
+      "title": "Tool Success Rate",
+      "targets": [
+        {
+          "expr": "sum(tool_executions_total{status=\"success\"}) / sum(tool_executions_total) * 100",
+          "legendFormat": "success %",
+          "refId": "P"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 90 },
+              { "color": "green", "value": 98 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "gridPos": { "x": 12, "y": 45, "w": 6, "h": 5 }
+    },
+    {
+      "type": "stat",
+      "title": "Tool Execution Rate (exec/min)",
+      "targets": [
+        {
+          "expr": "sum(rate(tool_executions_total[1m])) * 60",
+          "legendFormat": "exec/min",
+          "refId": "Q"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "gridPos": { "x": 18, "y": 45, "w": 6, "h": 5 }
+    },
+    {
+      "type": "graph",
+      "title": "Tool Execution Rate by Tool",
+      "targets": [
+        {
+          "expr": "sum by (tool_name, status) (rate(tool_executions_total[1m])) * 60",
+          "legendFormat": "{{tool_name}} ({{status}})",
+          "refId": "R"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "x": 0, "y": 50, "w": 12, "h": 9 }
+    },
+    {
+      "type": "graph",
+      "title": "Tool Errors Over Time",
+      "targets": [
+        {
+          "expr": "sum by (tool_name) (rate(tool_executions_total{status=\"error\"}[1m])) * 60",
+          "legendFormat": "{{tool_name}}",
+          "refId": "S"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "x": 12, "y": 50, "w": 12, "h": 9 }
     }
   ]
 }

@@ -8,6 +8,7 @@ from langchain_core.messages import (
 )
 
 from src.app.core.common.logging import logger
+from src.app.core.metrics.metrics import tool_executions_total
 
 
 def get_today_str() -> str:
@@ -38,10 +39,14 @@ def get_notes_from_tool_calls(messages: list[MessageLikeRepresentation]):
 
 async def execute_tool_safely(tool, args, config):
     """Safely execute a tool with error handling."""
+    name = tool.name if hasattr(tool, "name") else tool.get("name", "unknown")
     try:
-        logger.info("tool_call_started", tool_name=tool.name if hasattr(tool, "name") else tool.get("name", "unknown"), args=args)
-        return await tool.ainvoke(args, config)
+        logger.info("tool_call_started", tool_name=name, args=args)
+        result = await tool.ainvoke(args, config)
+        tool_executions_total.labels(tool_name=name, status="success").inc()
+        return result
     except Exception as e:
+        tool_executions_total.labels(tool_name=name, status="error").inc()
         return f"Error executing tool: {str(e)}"
 
 

@@ -17,6 +17,7 @@ from src.app.core.common.utils import get_api_key_for_model
 # ──────────────────────────────────────
 
 # General
+DEEP_RESEARCH_AGENT_NAME = "Deep Research"
 ALLOW_CLARIFICATION = True
 MAX_STRUCTURED_OUTPUT_RETRIES = 3
 

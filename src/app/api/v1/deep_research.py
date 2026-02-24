@@ -109,7 +109,7 @@ async def research_stream(
                 str: Server-sent events in JSON format.
             """
             try:
-                with llm_stream_duration_seconds.labels(model="deep_research").time():
+                with llm_stream_duration_seconds.labels(model="deep_research", agent_name=agent.name).time():
                     async for chunk in agent.agent_invoke_stream(
                         chat_request.messages, session.id, user_id=session.user_id
                     ):

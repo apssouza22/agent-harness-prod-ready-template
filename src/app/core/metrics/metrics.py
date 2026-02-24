@@ -23,26 +23,32 @@ orders_processed = Counter("orders_processed_total", "Total number of orders pro
 llm_inference_duration_seconds = Histogram(
     "llm_inference_duration_seconds",
     "Time spent processing LLM inference",
-    ["model"],
+    ["model", "agent_name"],
     buckets=[0.1, 0.3, 0.5, 1.0, 2.0, 5.0]
 )
 
 llm_stream_duration_seconds = Histogram(
     "llm_stream_duration_seconds",
     "Time spent processing LLM stream inference",
-    ["model"],
+    ["model", "agent_name"],
     buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
 )
 
 
 tokens_in_counter = Counter(
-    "llm_tokens_in", "Number of input tokens"
+    "llm_tokens_in", "Number of input tokens", ["agent_name"]
 )
 
 tokens_out_counter = Counter(
-    "llm_tokens_out", "Number of output tokens"
+    "llm_tokens_out", "Number of output tokens", ["agent_name"]
 )
 
 error_counter = Counter(
-    "llm_errors", "Number of errors during LLM execution"
+    "llm_errors", "Number of errors during LLM execution", ["agent_name"]
+)
+
+tool_executions_total = Counter(
+    "tool_executions_total",
+    "Total tool executions",
+    ["tool_name", "status"]
 )
