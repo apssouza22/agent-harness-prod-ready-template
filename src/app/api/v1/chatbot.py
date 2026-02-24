@@ -14,7 +14,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 
-from src.app.agents.example1 import get_agent_example
+from src.app.agents.chatbot import get_agent_example
 from src.app.api.metrics.http_metrics import llm_stream_duration_seconds
 from src.app.api.security.limiter import limiter
 from src.app.api.v1.auth import get_current_session

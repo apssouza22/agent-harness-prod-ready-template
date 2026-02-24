@@ -69,7 +69,7 @@ Your agent is a self-contained directory under `src/app/agents/`. It extends `Ag
 
 ## Build Your Own Agent
 
-Every agent lives in its own directory under `src/app/agents/`. The included `example1` agent is a working reference.
+Every agent lives in its own directory under `src/app/agents/`. The included `chatbot` agent is a working reference.
 
 ### 1. Create the agent directory
 
@@ -213,9 +213,9 @@ Monitoring endpoints:
 src/
   app/
     agents/                    # Your agents live here
-      example1/                # Reference agent implementation
+      chatbot/                 # Reference agent implementation
         __init__.py            #   load_system_prompt()
-        agent_example.py       #   AgentExample1(AgentAbstract)
+        agent_chatbot.py       #   AgentChatbot
         system.md              #   System prompt template
         tools/                 #   Agent-specific tools
           duckduckgo_search.py

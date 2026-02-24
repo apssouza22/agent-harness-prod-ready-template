@@ -25,4 +25,4 @@ src/evals/reports/
 /.claude/settings.local.json
 /.vscode/
 /.claude/
-/logs/
+logs/

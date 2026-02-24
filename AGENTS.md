@@ -88,7 +88,6 @@ This is a production-ready AI agent application built with:
 ## Database Operations
 
 - Use SQLModel for ORM models (combines SQLAlchemy + Pydantic)
-- Define models in `app/models/` directory
 - Use async database operations with asyncpg
 - Use LangGraph's AsyncPostgresSaver for agent checkpointing
 

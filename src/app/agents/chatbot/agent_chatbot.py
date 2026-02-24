@@ -24,7 +24,7 @@ from src.app.core.memory.memory import get_relevant_memory, bg_update_memory
 from src.app.init import langfuse_callback_handler
 
 
-class AgentExample1:
+class AgentChatbot:
     """Example agent to demonstrate the agentic framework."""
 
     def __init__(self, name: str, agent_name: str, tools: list[BaseTool], checkpointer: AsyncPostgresSaver):
