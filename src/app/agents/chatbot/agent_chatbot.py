@@ -16,20 +16,26 @@ from src.app.core.common.logging import logger
 from src.app.core.metrics.metrics import llm_inference_duration_seconds, tool_executions_total
 from src.app.core.common.model.graph import GraphState
 from src.app.core.common.model.message import Message
-from src.app.core.llm.llm import LLMRegistry
 from src.app.core.llm.llm_utils import dump_messages, prepare_messages, process_llm_response, record_token_usage, record_llm_error
 from src.app.core.mcp.mcp_utils import handle_mcp_tool_call
 from src.app.core.mcp.session_manager import get_mcp_session_manager
 from src.app.core.memory.memory import get_relevant_memory, bg_update_memory
 from src.app.init import langfuse_callback_handler
 
+from langchain.chat_models import init_chat_model
+
+
+chatbot_model = init_chat_model(
+    model=f"openai:{settings.DEFAULT_LLM_MODEL}",
+    api_key=settings.OPENAI_API_KEY,
+    max_tokens=settings.MAX_TOKENS,
+)
 
 class AgentChatbot:
     """Example agent to demonstrate the agentic framework."""
 
-    def __init__(self, name: str, agent_name: str, tools: list[BaseTool], checkpointer: AsyncPostgresSaver):
+    def __init__(self, name: str, tools: list[BaseTool], checkpointer: AsyncPostgresSaver):
         self.name = name
-        self.agent_name = agent_name
         self.checkpointer = checkpointer
         self.tools = tools
         self.tools_by_name = {tool.name: tool for tool in tools}
@@ -221,28 +227,25 @@ class AgentChatbot:
         Returns:
             Command: Command object with updated state and next node to execute.
         """
-        model_name = settings.DEFAULT_LLM_MODEL
-        llm = LLMRegistry.get(model_name, self.agent_name)
-
         system_prompt = load_system_prompt(long_term_memory=state.long_term_memory)
-        messages = prepare_messages(state.messages, llm, system_prompt)
+        messages = prepare_messages(state.messages, chatbot_model, system_prompt)
 
         model = (
-            llm
+            chatbot_model
             .bind_tools(self._get_all_tools())
             .with_retry(stop_after_attempt=3)
         )
 
         try:
-            with llm_inference_duration_seconds.labels(model=model_name, agent_name=self.name).time():
+            with llm_inference_duration_seconds.labels(model=settings.DEFAULT_LLM_MODEL, agent_name=self.name).time():
                 response_message = await model.ainvoke(dump_messages(messages), config)
 
-            record_token_usage(response_message, model_name, self.name)
+            record_token_usage(response_message, settings.DEFAULT_LLM_MODEL, self.name)
             response_message = process_llm_response(response_message)
             logger.info(
                 "llm_response_generated",
                 session_id=config["configurable"]["thread_id"],
-                model=model_name,
+                model=settings.DEFAULT_LLM_MODEL,
                 environment=settings.ENVIRONMENT.value,
             )
 
@@ -250,11 +253,11 @@ class AgentChatbot:
 
             return Command(update={"messages": [response_message]}, goto=goto)
         except Exception as e:
-            record_llm_error(model_name, self.name)
+            record_llm_error(settings.DEFAULT_LLM_MODEL, self.name)
             logger.error(
                 "llm_call_failed",
                 session_id=config["configurable"]["thread_id"],
-                model=model_name,
+                model=settings.DEFAULT_LLM_MODEL,
                 error=str(e),
                 environment=settings.ENVIRONMENT.value,
             )

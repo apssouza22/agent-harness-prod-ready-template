@@ -7,6 +7,6 @@ from src.app.core.checkpoint.checkpointer import get_checkpointer
 
 
 async def get_agent_example() -> AgentChatbot:
-    agent = AgentChatbot("Agent Example", "default", tools, await get_checkpointer())
+    agent = AgentChatbot("Agent Example", tools, await get_checkpointer())
     await agent.compile()
     return agent
