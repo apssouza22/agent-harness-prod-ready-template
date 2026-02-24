@@ -34,6 +34,8 @@ from src.app.core.common.token_limit import is_token_limit_exceeded
 from src.app.core.common.utils import (
     get_notes_from_tool_calls,
 )
+from src.app.core.llm.llm_utils import record_token_usage, record_llm_error
+from src.app.core.metrics.metrics import llm_inference_duration_seconds
 
 
 class SupervisorAgent:
@@ -96,8 +98,10 @@ class SupervisorAgent:
 
         supervisor_messages = state.get("supervisor_messages", [])
         supervisor_model.tools(self.tools)
-        response = await supervisor_model.ainvoke(supervisor_messages)
+        with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL).time():
+            response = await supervisor_model.ainvoke(supervisor_messages)
 
+        record_token_usage(response, RESEARCH_MODEL)
         return Command(
             goto="supervisor_tools",
             update={

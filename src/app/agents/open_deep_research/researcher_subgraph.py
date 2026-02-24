@@ -43,6 +43,8 @@ from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.common.token_limit import is_token_limit_exceeded
 from src.app.core.common.utils import get_today_str, execute_tools
+from src.app.core.llm.llm_utils import record_token_usage, record_llm_error
+from src.app.core.metrics.metrics import llm_inference_duration_seconds
 
 
 class ResearcherAgent:
@@ -96,8 +98,10 @@ class ResearcherAgent:
         researcher_prompt = research_system_prompt.format(date=get_today_str())
         messages = [SystemMessage(content=researcher_prompt)] + researcher_messages
         researcher_model.bind_tools(tools)
-        response = await researcher_model.ainvoke(messages, config)
+        with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL).time():
+            response = await researcher_model.ainvoke(messages, config)
 
+        record_token_usage(response, RESEARCH_MODEL)
         return Command(
             goto="researcher_tools",
             update={
@@ -180,8 +184,10 @@ class ResearcherAgent:
                 compression_prompt = compress_research_system_prompt.format(date=get_today_str())
                 messages = [SystemMessage(content=compression_prompt)] + researcher_messages
 
-                response = await synthesizer_model.ainvoke(messages, config)
+                with llm_inference_duration_seconds.labels(model=COMPRESSION_MODEL).time():
+                    response = await synthesizer_model.ainvoke(messages, config)
 
+                record_token_usage(response, COMPRESSION_MODEL)
                 raw_notes_content = "\n".join([
                     str(message.content)
                     for message in filter_messages(researcher_messages, include_types=["tool", "ai"])
@@ -193,6 +199,7 @@ class ResearcherAgent:
                 }
 
             except Exception as e:
+                record_llm_error(COMPRESSION_MODEL)
                 synthesis_attempts += 1
 
                 if is_token_limit_exceeded(e, RESEARCH_MODEL):

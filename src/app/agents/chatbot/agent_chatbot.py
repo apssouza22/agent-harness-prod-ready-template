@@ -13,11 +13,11 @@ from langgraph.types import RunnableConfig, Command, StateSnapshot
 from src.app.core.common.config import settings, Environment
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
-from src.app.core.common.metrics import llm_inference_duration_seconds
+from src.app.core.metrics.metrics import llm_inference_duration_seconds
 from src.app.core.common.model.graph import GraphState
 from src.app.core.common.model.message import Message
 from src.app.core.llm.llm import LLMRegistry
-from src.app.core.llm.llm_utils import dump_messages, prepare_messages, process_llm_response
+from src.app.core.llm.llm_utils import dump_messages, prepare_messages, process_llm_response, record_token_usage, record_llm_error
 from src.app.core.mcp.mcp_utils import handle_mcp_tool_call
 from src.app.core.mcp.session_manager import get_mcp_session_manager
 from src.app.core.memory.memory import get_relevant_memory, bg_update_memory
@@ -119,6 +119,7 @@ class AgentChatbot:
                 bg_update_memory(user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"])
 
         except Exception as stream_error:
+            record_llm_error(settings.DEFAULT_LLM_MODEL)
             logger.error("stream_processing_failed", error=str(stream_error), session_id=session_id)
             raise stream_error
 
@@ -231,6 +232,7 @@ class AgentChatbot:
             with llm_inference_duration_seconds.labels(model=model_name).time():
                 response_message = await model.ainvoke(dump_messages(messages), config)
 
+            record_token_usage(response_message, model_name)
             response_message = process_llm_response(response_message)
             logger.info(
                 "llm_response_generated",
@@ -243,6 +245,7 @@ class AgentChatbot:
 
             return Command(update={"messages": [response_message]}, goto=goto)
         except Exception as e:
+            record_llm_error(model_name)
             logger.error(
                 "llm_call_failed",
                 session_id=config["configurable"]["thread_id"],

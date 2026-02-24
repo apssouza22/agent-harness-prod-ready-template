@@ -15,7 +15,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 
 from src.app.agents.open_deep_research import get_deep_research_agent
-from src.app.api.metrics.http_metrics import llm_stream_duration_seconds
+from src.app.core.metrics.metrics import llm_stream_duration_seconds
 from src.app.api.security.limiter import limiter
 from src.app.api.v1.auth import get_current_session
 from src.app.api.v1.dtos.chat import (

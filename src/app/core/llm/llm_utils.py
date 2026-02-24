@@ -7,6 +7,37 @@ from langchain_core.messages import trim_messages as _trim_messages
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.common.model.message import Message
+from src.app.core.metrics.metrics import tokens_in_counter, tokens_out_counter, error_counter
+
+
+def record_token_usage(response: BaseMessage, model: str) -> None:
+    """Extract token usage from an LLM response and increment Prometheus counters.
+
+    Uses LangChain's standardised ``usage_metadata`` attribute which is
+    populated by all major providers (OpenAI, Anthropic, Google, etc.).
+    """
+    usage = getattr(response, "usage_metadata", None)
+    if not usage:
+        logger.debug("no_usage_metadata_in_response", model=model)
+        return
+
+    input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+
+    tokens_in_counter.inc(input_tokens)
+    tokens_out_counter.inc(output_tokens)
+
+    logger.debug(
+        "llm_token_usage_recorded",
+        model=model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+
+
+def record_llm_error(model: str) -> None:
+    """Increment the LLM error counter."""
+    error_counter.inc()
 
 
 def dump_messages(messages: list[Message]) -> list[dict]:

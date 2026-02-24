@@ -25,7 +25,7 @@ from src.app.core.common.config import Environment, settings
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
 from src.app.core.common.model.message import Message
-from src.app.core.llm.llm_utils import dump_messages
+from src.app.core.llm.llm_utils import dump_messages, record_llm_error
 from src.app.core.memory.memory import bg_update_memory
 from src.app.init import langfuse_callback_handler
 
@@ -111,6 +111,7 @@ class DeepResearchAgent:
             return process_messages(response["messages"])
 
         except Exception as e:
+            record_llm_error("deep_research")
             if settings.ENVIRONMENT == Environment.DEVELOPMENT:
                 raise e
             logger.exception("deep_research_invoke_failed", session_id=session_id, error=str(e))
@@ -148,6 +149,7 @@ class DeepResearchAgent:
                 bg_update_memory(user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"])
 
         except Exception as stream_error:
+            record_llm_error("deep_research")
             logger.error("deep_research_stream_failed", error=str(stream_error), session_id=session_id)
             raise stream_error
 

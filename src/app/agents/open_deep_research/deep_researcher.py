@@ -21,6 +21,7 @@ from src.app.agents.open_deep_research.config import (
     FINAL_REPORT_MODEL,
     MAX_CONCURRENT_RESEARCH_UNITS,
     MAX_RESEARCHER_ITERATIONS,
+    RESEARCH_MODEL,
     research_brief_model, clarification_model,
 )
 from src.app.agents.open_deep_research.prompts import (
@@ -36,6 +37,8 @@ from src.app.core.common.token_limit import is_token_limit_exceeded, get_model_t
 from src.app.core.common.utils import (
     get_today_str,
 )
+from src.app.core.llm.llm_utils import record_token_usage, record_llm_error
+from src.app.core.metrics.metrics import llm_inference_duration_seconds
 
 
 async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Command[Literal["write_research_brief", "__end__"]]:
@@ -58,7 +61,8 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Comman
         messages=get_buffer_string(messages),
         date=get_today_str()
     )
-    response = await clarification_model.ainvoke([HumanMessage(content=prompt_content)])
+    with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL).time():
+        response = await clarification_model.ainvoke([HumanMessage(content=prompt_content)])
 
     if response.need_clarification:
         return Command(
@@ -92,7 +96,8 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
         messages=get_buffer_string(state.get("messages", [])),
         date=get_today_str()
     )
-    response = await research_brief_model.ainvoke([HumanMessage(content=prompt_content)])
+    with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL).time():
+        response = await research_brief_model.ainvoke([HumanMessage(content=prompt_content)])
 
     supervisor_system_prompt = lead_researcher_prompt.format(
         date=get_today_str(),
@@ -146,10 +151,12 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
                 date=get_today_str()
             )
 
-            final_report = await final_report_model.ainvoke([
-                HumanMessage(content=final_report_prompt)
-            ])
+            with llm_inference_duration_seconds.labels(model=FINAL_REPORT_MODEL).time():
+                final_report = await final_report_model.ainvoke([
+                    HumanMessage(content=final_report_prompt)
+                ])
 
+            record_token_usage(final_report, FINAL_REPORT_MODEL)
             return {
                 "final_report": final_report.content,
                 "messages": [final_report],
@@ -157,6 +164,7 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
             }
 
         except Exception as e:
+            record_llm_error(FINAL_REPORT_MODEL)
             if is_token_limit_exceeded(e, FINAL_REPORT_MODEL):
                 current_retry += 1
 
