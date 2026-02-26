@@ -10,6 +10,7 @@ from langgraph.graph import END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import RunnableConfig, Command, StateSnapshot
 
+from src.app.agents.guardrails import create_input_guardrail_node, create_output_guardrail_node
 from src.app.core.common.config import settings, Environment
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
@@ -249,7 +250,7 @@ class AgentChatbot:
                 environment=settings.ENVIRONMENT.value,
             )
 
-            goto = "tool_call" if response_message.tool_calls else END
+            goto = "tool_call" if response_message.tool_calls else "output_guardrail"
 
             return Command(update={"messages": [response_message]}, goto=goto)
         except Exception as e:
@@ -265,11 +266,16 @@ class AgentChatbot:
 
     async def _create_graph(self) -> StateGraph:
         try:
+            input_guardrail = create_input_guardrail_node(next_node="chat")
+            output_guardrail = create_output_guardrail_node()
+
             graph_builder = StateGraph(GraphState)
-            graph_builder.add_node("chat", self._chat_node, ends=["tool_call", END])
+            graph_builder.add_node("input_guardrail", input_guardrail, ends=["chat", END])
+            graph_builder.add_node("chat", self._chat_node, ends=["tool_call", "output_guardrail"])
             graph_builder.add_node("tool_call", self._tool_call_node, ends=["chat"])
-            graph_builder.set_entry_point("chat")
-            graph_builder.set_finish_point("chat")
+            graph_builder.add_node("output_guardrail", output_guardrail)
+            graph_builder.set_entry_point("input_guardrail")
+            graph_builder.add_edge("output_guardrail", END)
             return graph_builder
         except Exception as e:
             logger.error("graph_creation_failed", error=str(e), environment=settings.ENVIRONMENT.value)

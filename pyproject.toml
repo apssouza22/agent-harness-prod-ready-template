@@ -53,12 +53,13 @@ dependencies = [
 dev = ["black", "isort", "flake8", "ruff", "djlint==1.36.4"]
 
 [dependency-groups]
-test = ["httpx>=0.28.1", "pytest>=8.3.5"]
+test = ["httpx>=0.28.1", "pytest>=8.3.5", "pytest-asyncio>=0.25.0"]
 
 
 [tool.pytest.ini_options]
 markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
 python_files = ["test_*.py", "*_test.py", "tests.py"]
+asyncio_mode = "auto"
 
 [tool.black]
 line-length = 119

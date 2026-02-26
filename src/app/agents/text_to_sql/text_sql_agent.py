@@ -7,8 +7,18 @@ from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
 from langchain_openai import ChatOpenAI
 
+from src.app.agents.guardrails import (
+    PIIStrategy,
+    PIIType,
+    apply_pii_strategy,
+    check_content_filter,
+    detect_pii,
+    evaluate_safety,
+    get_safe_replacement_message,
+)
 from src.app.core.common.config import settings
 from src.app.core.common.graph_utils import process_messages
+from src.app.core.common.logging import logger
 from src.app.core.common.model.message import Message
 from src.app.init import langfuse_callback_handler
 
@@ -27,6 +37,23 @@ class TextSQLDeepAgent:
         user_id: Optional[int] = None,
     ) -> list[Message] | list[Any]:
         """Invoke the SQL Deep Agent with the given input and return its response."""
+        query = agent_input.get("query", "")
+
+        # Input guardrails: content filter + PII block
+        filter_result = check_content_filter(query)
+        if filter_result.is_blocked:
+            logger.info("text_sql_input_guardrail_blocked", reason=filter_result.reason, session_id=session_id)
+            return [Message(role="assistant", content="I cannot process this request. Please rephrase your message.")]
+
+        pii_findings = detect_pii(query, pii_types=[PIIType.API_KEY, PIIType.SSN, PIIType.CREDIT_CARD])
+        if pii_findings:
+            detected_types = list({f["type"].value for f in pii_findings})
+            logger.info("text_sql_input_guardrail_pii_blocked", pii_types=detected_types, session_id=session_id)
+            return [Message(
+                role="assistant",
+                content="Your message contains sensitive information. Please remove it and try again.",
+            )]
+
         config = {
             "callbacks": [langfuse_callback_handler],
             "configurable": {"thread_id": session_id},
@@ -39,9 +66,33 @@ class TextSQLDeepAgent:
         }
 
         response = await self.agent.ainvoke({
-            "messages": [{"role": "user", "content": agent_input.get("query", "")}]
+            "messages": [{"role": "user", "content": query}]
         }, config=config)
-        return process_messages(response["messages"])
+        messages = process_messages(response["messages"])
+
+        # Output guardrails: PII redaction + safety check
+        if messages:
+            last = messages[-1]
+            if last.role == "assistant":
+                modified_content = last.content
+
+                output_pii = detect_pii(modified_content, pii_types=[
+                    PIIType.EMAIL, PIIType.CREDIT_CARD, PIIType.SSN,
+                    PIIType.PHONE, PIIType.API_KEY, PIIType.IP,
+                ])
+                if output_pii:
+                    redacted = apply_pii_strategy(modified_content, output_pii, PIIStrategy.REDACT)
+                    if redacted is not None:
+                        modified_content = redacted
+
+                is_safe = await evaluate_safety(modified_content)
+                if not is_safe:
+                    modified_content = get_safe_replacement_message()
+
+                if modified_content != last.content:
+                    messages[-1] = Message(role="assistant", content=modified_content)
+
+        return messages
 
 
 def create_sql_deep_agent():

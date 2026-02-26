@@ -15,6 +15,7 @@ from langgraph.constants import START, END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import StateSnapshot
 
+from src.app.agents.guardrails import create_input_guardrail_node, create_output_guardrail_node
 from src.app.agents.open_deep_research.deep_researcher import clarify_with_user, write_research_brief, final_report_generation
 from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgent
 from src.app.agents.open_deep_research.state import AgentState, AgentInputState, ConductResearch, ResearchComplete
@@ -166,17 +167,25 @@ class DeepResearchAgent:
         Returns:
             StateGraph: The uncompiled deep research graph builder.
         """
+        input_guardrail = create_input_guardrail_node(next_node="clarify_with_user")
+        output_guardrail = create_output_guardrail_node()
+
         deep_researcher_builder = StateGraph(AgentState, input=AgentInputState)
 
-        # Add main workflow nodes for the complete research process
+        # Guardrail nodes wrap the entire research workflow
+        deep_researcher_builder.add_node("input_guardrail", input_guardrail, ends=["clarify_with_user", END])
+        deep_researcher_builder.add_node("output_guardrail", output_guardrail)
+
+        # Main workflow nodes for the complete research process
         deep_researcher_builder.add_node("clarify_with_user", clarify_with_user)
         deep_researcher_builder.add_node("write_research_brief", write_research_brief)
         deep_researcher_builder.add_node("research_supervisor", self.supervisor_subagent.get_graph())
         deep_researcher_builder.add_node("final_report_generation", final_report_generation)
 
-        # Define main workflow edges for sequential execution
-        deep_researcher_builder.add_edge(START, "clarify_with_user")
+        # Workflow edges: input_guardrail → research pipeline → output_guardrail
+        deep_researcher_builder.add_edge(START, "input_guardrail")
         deep_researcher_builder.add_edge("research_supervisor", "final_report_generation")
-        deep_researcher_builder.add_edge("final_report_generation", END)
+        deep_researcher_builder.add_edge("final_report_generation", "output_guardrail")
+        deep_researcher_builder.add_edge("output_guardrail", END)
 
         return deep_researcher_builder

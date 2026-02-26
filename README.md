@@ -22,15 +22,9 @@ flowchart LR
   Prometheus --> Grafana
 ```
 
-Your agent is a self-contained directory under `src/app/agents/`. It extends `AgentAbstract`, defines its own graph, system prompt, and tools. The harness handles everything else.
+Your agent is a self-contained directory under `src/app/agents/`.  The harness handles everything else.
 
 ## What You Get
-
-**Agent Abstraction**
-- `AgentAbstract` base class with built-in tool calling, MCP integration, memory retrieval, and streaming
-- Self-contained agent directories: each agent owns its graph, prompt, and tools
-- Automatic MCP tool discovery and reconnection with graceful degradation
-
 **API Layer**
 - FastAPI with async endpoints and uvloop optimization
 - JWT-based authentication with session management (register, login, multi-session)
@@ -50,10 +44,7 @@ Your agent is a self-contained directory under `src/app/agents/`. It extends `Ag
 - Automatic request context binding (request_id, session_id, user_id)
 
 **LLM Management**
-- Multi-model registry (GPT-5, GPT-5-mini, GPT-5-nano, GPT-4o, GPT-4o-mini)
-- Circular fallback: if the primary model fails, the service tries the next model in the registry
-- Automatic retries with exponential backoff via tenacity
-- Environment-specific tuning (temperature, top_p, penalties)
+- Automatic retries with exponential backoff
 
 **Evaluation Framework**
 - Metric-based evaluation of model outputs using Langfuse traces
@@ -100,47 +91,7 @@ Instructions for the agent.
 {current_date_and_time}
 ```
 
-### 3. Implement the agent
-
-Extend `AgentAbstract` and implement `_create_graph()`:
-
-```python
-from langgraph.graph import END
-from langgraph.graph.state import StateGraph
-from langgraph.types import RunnableConfig, Command
-
-from src.app.core.agentic.agent_base import AgentAbstract
-from src.app.core.common.model.graph import GraphState
-
-
-class MyAgent(AgentAbstract):
-
-    async def _chat_node(self, state: GraphState, config: RunnableConfig) -> Command:
-        system_prompt = load_system_prompt(long_term_memory=state.long_term_memory)
-        messages = prepare_messages(state.messages, self.llm_service.get_llm(), system_prompt)
-        response = await self.llm_service.call(dump_messages(messages))
-        response = process_llm_response(response)
-
-        if response.tool_calls:
-            return Command(update={"messages": [response]}, goto="tool_call")
-        return Command(update={"messages": [response]}, goto=END)
-
-    async def _create_graph(self) -> StateGraph:
-        graph = StateGraph(GraphState)
-        graph.add_node("chat", self._chat_node, ends=["tool_call", END])
-        graph.add_node("tool_call", self._tool_call_node, ends=["chat"])
-        graph.set_entry_point("chat")
-        graph.set_finish_point("chat")
-        return graph
-```
-
-The base class gives you for free:
-- `agent_invoke()` and `agent_invoke_stream()` -- invoke/stream with memory retrieval and background updates
-- `_tool_call_node()` -- handles both built-in and MCP tool calls with reconnection logic
-- `get_chat_history()` -- retrieves conversation history from checkpoints
-- Automatic Langfuse tracing via `config["callbacks"]`
-
-### 4. Wire it to an API endpoint
+### 3. Wire it to an API endpoint
 
 ```python
 from src.app.agents.my_agent.agent import MyAgent
@@ -279,20 +230,6 @@ See `.env.example` for the complete list.
 
 Powered by mem0ai with pgvector. Memories are stored per user and retrieved by semantic similarity before each agent invocation. Memory updates happen in the background via `asyncio.create_task` so they never block the response.
 
-### LLM Service
-
-The `LLMService` maintains a registry of models and provides:
-- Automatic retries (3 attempts, exponential backoff) on rate limits, timeouts, and API errors
-- Circular fallback through all registered models when one fails
-- Tool binding across model switches
-
-| Model | Use Case | Reasoning Effort |
-|-------|----------|-----------------|
-| gpt-5 | Complex reasoning | Medium |
-| gpt-5-mini | Balanced performance | Low |
-| gpt-5-nano | Fast responses | Minimal |
-| gpt-4o | Production workloads | N/A |
-| gpt-4o-mini | Cost-effective tasks | N/A |
 
 ### Model Context Protocol (MCP)
 
