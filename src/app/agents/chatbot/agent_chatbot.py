@@ -10,7 +10,7 @@ from langgraph.graph import END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import RunnableConfig, Command, StateSnapshot
 
-from src.app.agents.guardrails import create_input_guardrail_node, create_output_guardrail_node
+from src.app.core.guardrails import create_input_guardrail_node, create_output_guardrail_node
 from src.app.core.common.config import settings, Environment
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger

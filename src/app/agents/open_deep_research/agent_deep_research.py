@@ -15,7 +15,7 @@ from langgraph.constants import START, END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import StateSnapshot
 
-from src.app.agents.guardrails import create_input_guardrail_node, create_output_guardrail_node
+from src.app.core.guardrails import create_input_guardrail_node, create_output_guardrail_node
 from src.app.agents.open_deep_research.deep_researcher import clarify_with_user, write_research_brief, final_report_generation
 from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgent
 from src.app.agents.open_deep_research.state import AgentState, AgentInputState, ConductResearch, ResearchComplete

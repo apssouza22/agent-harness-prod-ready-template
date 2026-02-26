@@ -15,9 +15,9 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END
 from langgraph.types import Command
 
-from src.app.agents.guardrails.content_filter import ContentFilterResult, check_content_filter
-from src.app.agents.guardrails.pii import PIIStrategy, PIIType, apply_pii_strategy, detect_pii
-from src.app.agents.guardrails.safety_check import evaluate_safety, get_safe_replacement_message
+from src.app.core.guardrails.content_filter import ContentFilterResult, check_content_filter
+from src.app.core.guardrails.pii import PIIStrategy, PIIType, apply_pii_strategy, detect_pii
+from src.app.core.guardrails.safety_check import evaluate_safety, get_safe_replacement_message
 from src.app.core.common.logging import logger
 
 BLOCKED_INPUT_MESSAGE = (

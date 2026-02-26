@@ -7,7 +7,7 @@ from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
 from langchain_openai import ChatOpenAI
 
-from src.app.agents.guardrails import (
+from src.app.core.guardrails import (
     PIIStrategy,
     PIIType,
     apply_pii_strategy,
