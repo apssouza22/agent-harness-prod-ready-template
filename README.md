@@ -128,8 +128,14 @@ cp .env.example .env.development
 # Run
 make dev
 ```
-
 Swagger UI: `http://localhost:8000/docs`
+
+### Test
+
+```bash
+ uv run pytest tests/
+```
+
 
 ### Database
 
@@ -157,45 +163,6 @@ make docker-compose-up ENV=development
 Monitoring endpoints:
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000` (admin/admin)
-
-## Project Structure
-
-```
-src/
-  app/
-    agents/                    # Your agents live here
-      chatbot/                 # Reference agent implementation
-        __init__.py            #   load_system_prompt()
-        agent_chatbot.py       #   AgentChatbot
-        system.md              #   System prompt template
-        tools/                 #   Agent-specific tools
-          duckduckgo_search.py
-    api/
-      v1/                      # Versioned API routes
-        auth.py                #   Register, login, sessions
-        chatbot.py             #   Chat and streaming endpoints
-      logging_context.py       # Request context middleware
-      metrics/                 # Prometheus metrics middleware
-      security/                # JWT auth, rate limiter
-    core/
-      agentic/
-        agent_base.py          # AgentAbstract base class
-      checkpoint/              # LangGraph state persistence
-      common/                  # Config, logging, models, metrics
-      db/                      # Database connection pooling
-      llm/                     # LLM registry and service
-      mcp/                     # MCP session manager and utils
-      memory/                  # Long-term memory (mem0ai)
-      session/                 # Session model and repository
-      user/                    # User model and repository
-  cli/
-    api_client.py              # Interactive CLI client
-  evals/
-    evaluator.py               # Evaluation engine
-    metrics/prompts/           # Evaluation metric definitions
-  mcp/
-    server.py                  # Sample MCP server
-```
 
 ## Configuration
 

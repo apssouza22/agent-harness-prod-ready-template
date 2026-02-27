@@ -5,7 +5,7 @@ and token verification.
 """
 
 import uuid
-from typing import List
+from typing import List, Optional
 
 from fastapi import (
     APIRouter,
@@ -44,11 +44,17 @@ from src.app.core.user.user_model import User
 from src.app.init import user_repository, session_repository
 
 router = APIRouter()
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
+
+_missing_credentials = HTTPException(
+    status_code=401,
+    detail="Not authenticated",
+    headers={"WWW-Authenticate": "Bearer"},
+)
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> User:
     """Get the current user ID from the token.
 
@@ -61,8 +67,9 @@ async def get_current_user(
     Raises:
         HTTPException: If the token is invalid or missing.
     """
+    if credentials is None:
+        raise _missing_credentials
     try:
-        # Sanitize token
         token = sanitize_string(credentials.credentials)
 
         user_id = verify_token(token)
@@ -100,7 +107,7 @@ async def get_current_user(
 
 
 async def get_current_session(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Session:
     """Get the current session ID from the token.
 
@@ -113,6 +120,8 @@ async def get_current_session(
     Raises:
         HTTPException: If the token is invalid or missing.
     """
+    if credentials is None:
+        raise _missing_credentials
     try:
         token = sanitize_string(credentials.credentials)
 
