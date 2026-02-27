@@ -23,7 +23,7 @@ from src.app.agents.open_deep_research.config import (
     MAX_CONCURRENT_RESEARCH_UNITS,
     MAX_RESEARCHER_ITERATIONS,
     RESEARCH_MODEL,
-    research_brief_model, clarification_model,
+    research_brief_model, clarification_model, final_report_model,
 )
 from src.app.agents.open_deep_research.prompts import (
     clarify_with_user_instructions,
@@ -38,8 +38,8 @@ from src.app.core.common.token_limit import is_token_limit_exceeded, get_model_t
 from src.app.core.common.utils import (
     get_today_str,
 )
-from src.app.core.llm.llm_utils import record_token_usage, record_llm_error
-from src.app.core.metrics.metrics import llm_inference_duration_seconds
+from src.app.core.llm.llm_utils import record_llm_error
+from src.app.core.metrics import model_invoke_with_metrics
 
 
 async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Command[Literal["write_research_brief", "__end__"]]:
@@ -62,8 +62,8 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Comman
         messages=get_buffer_string(messages),
         date=get_today_str()
     )
-    with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL, agent_name=DEEP_RESEARCH_AGENT_NAME).time():
-        response = await clarification_model.ainvoke([HumanMessage(content=prompt_content)])
+    model_input = [HumanMessage(content=prompt_content)]
+    response = await model_invoke_with_metrics(clarification_model, model_input, RESEARCH_MODEL, DEEP_RESEARCH_AGENT_NAME, config)
 
     if response.need_clarification:
         return Command(
@@ -97,8 +97,8 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
         messages=get_buffer_string(state.get("messages", [])),
         date=get_today_str()
     )
-    with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL, agent_name=DEEP_RESEARCH_AGENT_NAME).time():
-        response = await research_brief_model.ainvoke([HumanMessage(content=prompt_content)])
+    model_input = [HumanMessage(content=prompt_content)]
+    response = await model_invoke_with_metrics(research_brief_model, model_input, RESEARCH_MODEL, DEEP_RESEARCH_AGENT_NAME, config)
 
     supervisor_system_prompt = lead_researcher_prompt.format(
         date=get_today_str(),
@@ -151,13 +151,11 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
                 findings=findings,
                 date=get_today_str()
             )
+            model_input = [
+                HumanMessage(content=final_report_prompt)
+            ]
+            final_report = await model_invoke_with_metrics(final_report_model, model_input, FINAL_REPORT_MODEL, DEEP_RESEARCH_AGENT_NAME, config)
 
-            with llm_inference_duration_seconds.labels(model=FINAL_REPORT_MODEL, agent_name=DEEP_RESEARCH_AGENT_NAME).time():
-                final_report = await final_report_model.ainvoke([
-                    HumanMessage(content=final_report_prompt)
-                ])
-
-            record_token_usage(final_report, FINAL_REPORT_MODEL, DEEP_RESEARCH_AGENT_NAME)
             return {
                 "final_report": final_report.content,
                 "messages": [final_report],
@@ -195,3 +193,4 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
         "messages": [AIMessage(content="Report generation failed after maximum retries")],
         **cleared_state
     }
+

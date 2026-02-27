@@ -70,6 +70,11 @@ class TextSQLDeepAgent:
         }, config=config)
         messages = process_messages(response["messages"])
 
+        await self.process_safe_output(messages)
+
+        return messages
+
+    async def process_safe_output(self, messages):
         # Output guardrails: PII redaction + safety check
         if messages:
             last = messages[-1]
@@ -91,8 +96,6 @@ class TextSQLDeepAgent:
 
                 if modified_content != last.content:
                     messages[-1] = Message(role="assistant", content=modified_content)
-
-        return messages
 
 
 def create_sql_deep_agent():

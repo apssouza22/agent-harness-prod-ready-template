@@ -14,10 +14,11 @@ from src.app.core.guardrails import create_input_guardrail_node, create_output_g
 from src.app.core.common.config import settings, Environment
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
-from src.app.core.metrics.metrics import llm_inference_duration_seconds, tool_executions_total
+from src.app.core.metrics import model_invoke_with_metrics
+from src.app.core.metrics.metrics import tool_executions_total
 from src.app.core.common.model.graph import GraphState
 from src.app.core.common.model.message import Message
-from src.app.core.llm.llm_utils import dump_messages, prepare_messages, process_llm_response, record_token_usage, record_llm_error
+from src.app.core.llm.llm_utils import dump_messages, prepare_messages, process_llm_response, record_llm_error
 from src.app.core.mcp.mcp_utils import handle_mcp_tool_call
 from src.app.core.mcp.session_manager import get_mcp_session_manager
 from src.app.core.memory.memory import get_relevant_memory, bg_update_memory
@@ -238,10 +239,7 @@ class AgentChatbot:
         )
 
         try:
-            with llm_inference_duration_seconds.labels(model=settings.DEFAULT_LLM_MODEL, agent_name=self.name).time():
-                response_message = await model.ainvoke(dump_messages(messages), config)
-
-            record_token_usage(response_message, settings.DEFAULT_LLM_MODEL, self.name)
+            response_message = await model_invoke_with_metrics(model, dump_messages(messages), settings.DEFAULT_LLM_MODEL, self.name, config)
             response_message = process_llm_response(response_message)
             logger.info(
                 "llm_response_generated",

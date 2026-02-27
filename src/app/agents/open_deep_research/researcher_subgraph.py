@@ -43,8 +43,8 @@ from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.common.token_limit import is_token_limit_exceeded
 from src.app.core.common.utils import get_today_str, execute_tools
-from src.app.core.llm.llm_utils import record_token_usage, record_llm_error
-from src.app.core.metrics.metrics import llm_inference_duration_seconds
+from src.app.core.llm.llm_utils import record_llm_error
+from src.app.core.metrics import model_invoke_with_metrics
 
 
 class ResearcherAgent:
@@ -98,10 +98,7 @@ class ResearcherAgent:
         researcher_prompt = research_system_prompt.format(date=get_today_str())
         messages = [SystemMessage(content=researcher_prompt)] + researcher_messages
         researcher_model.bind_tools(tools)
-        with llm_inference_duration_seconds.labels(model=RESEARCH_MODEL, agent_name=self.name).time():
-            response = await researcher_model.ainvoke(messages, config)
-
-        record_token_usage(response, RESEARCH_MODEL, self.name)
+        response = await model_invoke_with_metrics(researcher_model, messages, RESEARCH_MODEL, self.name, config)
         return Command(
             goto="researcher_tools",
             update={
@@ -184,10 +181,7 @@ class ResearcherAgent:
                 compression_prompt = compress_research_system_prompt.format(date=get_today_str())
                 messages = [SystemMessage(content=compression_prompt)] + researcher_messages
 
-                with llm_inference_duration_seconds.labels(model=COMPRESSION_MODEL, agent_name=self.name).time():
-                    response = await synthesizer_model.ainvoke(messages, config)
-
-                record_token_usage(response, COMPRESSION_MODEL, self.name)
+                response = await model_invoke_with_metrics(synthesizer_model, messages, COMPRESSION_MODEL, self.name, config)
                 raw_notes_content = "\n".join([
                     str(message.content)
                     for message in filter_messages(researcher_messages, include_types=["tool", "ai"])
