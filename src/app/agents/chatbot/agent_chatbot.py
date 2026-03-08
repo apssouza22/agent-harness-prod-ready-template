@@ -75,7 +75,13 @@ class AgentChatbot:
         config = self._build_invoke_config(session_id, user_id)
 
         try:
-            response = await self._graph.ainvoke(input=agent_input, config=config)
+            response = await model_invoke_with_metrics(
+                self._graph,
+                agent_input,
+                settings.DEFAULT_LLM_MODEL,
+                self.name,
+                config,
+            )
             openai_style_messages = convert_to_openai_messages(response["messages"])
             result = [
                 Message(role=message["role"], content=str(message["content"]))
