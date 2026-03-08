@@ -54,8 +54,21 @@ class TextSQLDeepAgent:
                 content="Your message contains sensitive information. Please remove it and try again.",
             )]
 
+        config = await self.get_config(session_id, user_id)
+
+        response = await self.agent.ainvoke({
+            "messages": [{"role": "user", "content": query}]
+        }, config=config)
+
+        messages = process_messages(response["messages"])
+        await self.process_safe_output(messages)
+
+        return messages
+
+    async def get_config(self, session_id, user_id):
         config = {
             "callbacks": [langfuse_callback_handler],
+            "run_name": self.name,
             "configurable": {"thread_id": session_id},
             "metadata": {
                 "environment": settings.ENVIRONMENT.value,
@@ -64,15 +77,7 @@ class TextSQLDeepAgent:
                 "session_id": session_id,
             },
         }
-
-        response = await self.agent.ainvoke({
-            "messages": [{"role": "user", "content": query}]
-        }, config=config)
-        messages = process_messages(response["messages"])
-
-        await self.process_safe_output(messages)
-
-        return messages
+        return config
 
     async def process_safe_output(self, messages):
         # Output guardrails: PII redaction + safety check
