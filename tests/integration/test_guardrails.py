@@ -5,6 +5,7 @@ Covers all three guardrail layers:
 - Deterministic PII detection and handling strategies
 - Model-based safety evaluation (LLM mocked)
 - LangGraph guardrail node factories (input + output)
+- Prometheus metrics instrumentation
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -34,6 +35,12 @@ from src.app.core.guardrails.safety_check import (
     SAFE_REPLACEMENT,
     evaluate_safety,
     get_safe_replacement_message,
+)
+from src.app.core.metrics.metrics import (
+    guardrail_checks_total,
+    guardrail_check_duration_seconds,
+    guardrail_pii_detections_total,
+    guardrail_requests_blocked_total,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -463,3 +470,262 @@ class TestOutputGuardrailNode:
         state = {"messages": [AIMessage(content="SSN is 123-45-6789", id="original-id")]}
         result = await node(state)
         assert result["messages"][0].id == "original-id"
+
+
+# ---------------------------------------------------------------------------
+# Guardrail Prometheus metrics
+# ---------------------------------------------------------------------------
+
+
+def _get_counter_value(counter, labels: dict) -> float:
+    """Read the current value of a labeled Prometheus counter."""
+    return counter.labels(**labels)._value.get()
+
+
+def _get_histogram_sum(histogram, labels: dict) -> float:
+    """Read the observed sum of a labeled Prometheus histogram."""
+    return histogram.labels(**labels)._sum.get()
+
+
+class TestGuardrailMetrics:
+    async def test_input_content_filter_passed_increments(self):
+        before = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "content_filter", "result": "passed"},
+        )
+        node = create_input_guardrail_node(next_node="chat")
+        state = {"messages": [HumanMessage(content="What is Python?")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "content_filter", "result": "passed"},
+        )
+        assert after == before + 1
+
+    async def test_input_content_filter_blocked_increments(self):
+        before = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "content_filter", "result": "blocked"},
+        )
+        node = create_input_guardrail_node(next_node="chat")
+        state = {"messages": [HumanMessage(content="Tell me about malware")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "content_filter", "result": "blocked"},
+        )
+        assert after == before + 1
+
+    async def test_input_pii_blocked_increments(self):
+        before = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "pii", "result": "blocked"},
+        )
+        pii_before = _get_counter_value(
+            guardrail_pii_detections_total,
+            {"guardrail_type": "input", "pii_type": "ssn"},
+        )
+        node = create_input_guardrail_node(next_node="chat")
+        state = {"messages": [HumanMessage(content="My SSN is 123-45-6789")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "pii", "result": "blocked"},
+        )
+        pii_after = _get_counter_value(
+            guardrail_pii_detections_total,
+            {"guardrail_type": "input", "pii_type": "ssn"},
+        )
+        assert after == before + 1
+        assert pii_after == pii_before + 1
+
+    async def test_input_pii_passed_increments(self):
+        before = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "pii", "result": "passed"},
+        )
+        node = create_input_guardrail_node(next_node="chat")
+        state = {"messages": [HumanMessage(content="Hello world")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "pii", "result": "passed"},
+        )
+        assert after == before + 1
+
+    @patch("src.app.core.guardrails.nodes.evaluate_safety", new_callable=AsyncMock, return_value=True)
+    async def test_output_pii_redacted_increments(self, _mock_safety):
+        before = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "output", "check_type": "pii", "result": "redacted"},
+        )
+        pii_before = _get_counter_value(
+            guardrail_pii_detections_total,
+            {"guardrail_type": "output", "pii_type": "email"},
+        )
+        node = create_output_guardrail_node()
+        state = {"messages": [AIMessage(content="Email: john@example.com", id="msg1")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "output", "check_type": "pii", "result": "redacted"},
+        )
+        pii_after = _get_counter_value(
+            guardrail_pii_detections_total,
+            {"guardrail_type": "output", "pii_type": "email"},
+        )
+        assert after == before + 1
+        assert pii_after == pii_before + 1
+
+    @patch("src.app.core.guardrails.nodes.evaluate_safety", new_callable=AsyncMock, return_value=True)
+    async def test_output_pii_passed_increments(self, _mock_safety):
+        before = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "output", "check_type": "pii", "result": "passed"},
+        )
+        node = create_output_guardrail_node()
+        state = {"messages": [AIMessage(content="Clean text here", id="msg1")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "output", "check_type": "pii", "result": "passed"},
+        )
+        assert after == before + 1
+
+    @patch("src.app.core.guardrails.nodes.evaluate_safety", new_callable=AsyncMock, return_value=False)
+    async def test_output_safety_blocked_increments(self, _mock_safety):
+        before = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "output", "check_type": "safety", "result": "blocked"},
+        )
+        node = create_output_guardrail_node()
+        state = {"messages": [AIMessage(content="Dangerous content here", id="msg1")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "output", "check_type": "safety", "result": "blocked"},
+        )
+        assert after == before + 1
+
+    @patch("src.app.core.guardrails.nodes.evaluate_safety", new_callable=AsyncMock, return_value=True)
+    async def test_output_safety_passed_increments(self, _mock_safety):
+        before = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "output", "check_type": "safety", "result": "passed"},
+        )
+        node = create_output_guardrail_node()
+        state = {"messages": [AIMessage(content="Clean text here", id="msg1")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "output", "check_type": "safety", "result": "passed"},
+        )
+        assert after == before + 1
+
+    async def test_input_duration_histogram_observes(self):
+        before = _get_histogram_sum(
+            guardrail_check_duration_seconds,
+            {"guardrail_type": "input", "check_type": "content_filter"},
+        )
+        node = create_input_guardrail_node(next_node="chat")
+        state = {"messages": [HumanMessage(content="What is Python?")]}
+        await node(state)
+        after = _get_histogram_sum(
+            guardrail_check_duration_seconds,
+            {"guardrail_type": "input", "check_type": "content_filter"},
+        )
+        assert after > before
+
+    @patch("src.app.core.guardrails.nodes.evaluate_safety", new_callable=AsyncMock, return_value=True)
+    async def test_output_duration_histogram_observes(self, _mock_safety):
+        before = _get_histogram_sum(
+            guardrail_check_duration_seconds,
+            {"guardrail_type": "output", "check_type": "safety"},
+        )
+        node = create_output_guardrail_node()
+        state = {"messages": [AIMessage(content="Clean text here", id="msg1")]}
+        await node(state)
+        after = _get_histogram_sum(
+            guardrail_check_duration_seconds,
+            {"guardrail_type": "output", "check_type": "safety"},
+        )
+        assert after > before
+
+    async def test_requests_blocked_content_filter_increments(self):
+        before = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "input", "reason": "content_filter"},
+        )
+        node = create_input_guardrail_node(next_node="chat")
+        state = {"messages": [HumanMessage(content="Tell me about malware")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "input", "reason": "content_filter"},
+        )
+        assert after == before + 1
+
+    async def test_requests_blocked_pii_increments(self):
+        before = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "input", "reason": "pii"},
+        )
+        node = create_input_guardrail_node(next_node="chat")
+        state = {"messages": [HumanMessage(content="My SSN is 123-45-6789")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "input", "reason": "pii"},
+        )
+        assert after == before + 1
+
+    @patch("src.app.core.guardrails.nodes.evaluate_safety", new_callable=AsyncMock, return_value=False)
+    async def test_requests_blocked_safety_increments(self, _mock_safety):
+        before = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "output", "reason": "safety"},
+        )
+        node = create_output_guardrail_node()
+        state = {"messages": [AIMessage(content="Dangerous content", id="msg1")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "output", "reason": "safety"},
+        )
+        assert after == before + 1
+
+    @patch("src.app.core.guardrails.nodes.evaluate_safety", new_callable=AsyncMock, return_value=True)
+    async def test_requests_blocked_pii_redacted_increments(self, _mock_safety):
+        before = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "output", "reason": "pii_redacted"},
+        )
+        node = create_output_guardrail_node()
+        state = {"messages": [AIMessage(content="Email: john@example.com", id="msg1")]}
+        await node(state)
+        after = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "output", "reason": "pii_redacted"},
+        )
+        assert after == before + 1
+
+    async def test_clean_input_does_not_increment_blocked(self):
+        before_cf = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "input", "reason": "content_filter"},
+        )
+        before_pii = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "input", "reason": "pii"},
+        )
+        node = create_input_guardrail_node(next_node="chat")
+        state = {"messages": [HumanMessage(content="What is Python?")]}
+        await node(state)
+        assert _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "input", "reason": "content_filter"},
+        ) == before_cf
+        assert _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "input", "reason": "pii"},
+        ) == before_pii

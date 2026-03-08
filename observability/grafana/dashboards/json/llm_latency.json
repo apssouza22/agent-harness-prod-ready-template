@@ -2,7 +2,7 @@
   "id": null,
   "uid": "llm-latency",
   "title": "LLM Observability",
-  "tags": ["inference", "latency", "tokens", "errors", "tools"],
+  "tags": ["inference", "latency", "tokens", "errors", "tools", "guardrails"],
   "timezone": "browser",
   "schemaVersion": 30,
   "version": 6,
@@ -519,6 +519,213 @@
         "uid": "prometheus"
       },
       "gridPos": { "x": 12, "y": 50, "w": 12, "h": 9 }
+    },
+    {
+      "type": "row",
+      "title": "Guardrails",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 59, "w": 24, "h": 1 }
+    },
+    {
+      "type": "stat",
+      "title": "Total Guardrail Checks",
+      "targets": [
+        {
+          "expr": "sum(guardrail_checks_total)",
+          "legendFormat": "total",
+          "refId": "GR_A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "gridPos": { "x": 0, "y": 60, "w": 6, "h": 5 }
+    },
+    {
+      "type": "stat",
+      "title": "Total Blocked Requests",
+      "targets": [
+        {
+          "expr": "sum(guardrail_requests_blocked_total)",
+          "legendFormat": "blocked",
+          "refId": "GR_B"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "gridPos": { "x": 6, "y": 60, "w": 6, "h": 5 }
+    },
+    {
+      "type": "gauge",
+      "title": "Guardrail Pass Rate",
+      "targets": [
+        {
+          "expr": "sum(guardrail_checks_total{result=\"passed\"}) / sum(guardrail_checks_total) * 100",
+          "legendFormat": "pass %",
+          "refId": "GR_C"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "green", "value": 90 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "gridPos": { "x": 12, "y": 60, "w": 6, "h": 5 }
+    },
+    {
+      "type": "stat",
+      "title": "Total PII Detections",
+      "targets": [
+        {
+          "expr": "sum(guardrail_pii_detections_total)",
+          "legendFormat": "detections",
+          "refId": "GR_D"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 200 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "gridPos": { "x": 18, "y": 60, "w": 6, "h": 5 }
+    },
+    {
+      "type": "graph",
+      "title": "Guardrail Check Rate by Result",
+      "targets": [
+        {
+          "expr": "sum by (guardrail_type, check_type, result) (rate(guardrail_checks_total[1m])) * 60",
+          "legendFormat": "{{guardrail_type}} / {{check_type}} — {{result}}",
+          "refId": "GR_E"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "x": 0, "y": 65, "w": 12, "h": 9 }
+    },
+    {
+      "type": "graph",
+      "title": "Guardrail Check Duration (p95)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(guardrail_check_duration_seconds_bucket[1m]))",
+          "legendFormat": "{{guardrail_type}} / {{check_type}}",
+          "refId": "GR_F"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "gridPos": { "x": 12, "y": 65, "w": 12, "h": 9 }
+    },
+    {
+      "type": "graph",
+      "title": "PII Detections Over Time",
+      "targets": [
+        {
+          "expr": "sum by (guardrail_type, pii_type) (rate(guardrail_pii_detections_total[1m])) * 60",
+          "legendFormat": "{{guardrail_type}} / {{pii_type}}",
+          "refId": "GR_G"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "x": 0, "y": 74, "w": 12, "h": 9 }
+    },
+    {
+      "type": "graph",
+      "title": "Guardrail Blocks Over Time",
+      "targets": [
+        {
+          "expr": "sum by (guardrail_type, reason) (rate(guardrail_requests_blocked_total[1m])) * 60",
+          "legendFormat": "{{guardrail_type}} / {{reason}}",
+          "refId": "GR_H"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "x": 12, "y": 74, "w": 12, "h": 9 }
     }
   ]
 }

@@ -52,3 +52,29 @@ tool_executions_total = Counter(
     "Total tool executions",
     ["tool_name", "status"]
 )
+
+# Guardrail metrics
+guardrail_checks_total = Counter(
+    "guardrail_checks_total",
+    "Total guardrail checks executed",
+    ["guardrail_type", "check_type", "result"],
+)
+
+guardrail_check_duration_seconds = Histogram(
+    "guardrail_check_duration_seconds",
+    "Duration of guardrail checks in seconds",
+    ["guardrail_type", "check_type"],
+    buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0],
+)
+
+guardrail_pii_detections_total = Counter(
+    "guardrail_pii_detections_total",
+    "Total PII detections by type",
+    ["guardrail_type", "pii_type"],
+)
+
+guardrail_requests_blocked_total = Counter(
+    "guardrail_requests_blocked_total",
+    "Total requests blocked or modified by guardrails",
+    ["guardrail_type", "reason"],
+)
