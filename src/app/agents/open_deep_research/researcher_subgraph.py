@@ -7,6 +7,7 @@ LangGraph subgraph.
 
 from typing import Any, Literal, Optional
 
+from langchain.chat_models import init_chat_model
 from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
@@ -20,10 +21,9 @@ from langgraph.types import Command
 
 from src.app.agents.open_deep_research.config import (
     COMPRESSION_MODEL,
-    COMPRESSION_MODEL_MAX_TOKENS,
     MAX_REACT_TOOL_CALLS,
     RESEARCH_MODEL,
-    researcher_model, synthesizer_model,
+    configurable_model, MAX_STRUCTURED_OUTPUT_RETRIES, research_model_config, compress_model_config,
 )
 from src.app.agents.open_deep_research.prompts import (
     compress_research_simple_human_message,
@@ -46,6 +46,8 @@ from src.app.core.common.utils import get_today_str, execute_tools
 from src.app.core.llm.llm_utils import record_llm_error
 from src.app.core.metrics import model_invoke_with_metrics
 
+synthesizer_model = init_chat_model().with_config(compress_model_config)
+
 
 class ResearcherAgent:
     """Individual researcher subgraph that conducts focused research on specific topics.
@@ -60,6 +62,13 @@ class ResearcherAgent:
         self.tools = tools
         self._graph: Optional[CompiledStateGraph] = None
 
+        self.researcher_model = (
+            configurable_model
+            .bind_tools(tools)
+            .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
+            .with_config(research_model_config)
+        )
+
     async def compile(self) -> CompiledStateGraph:
         graph_builder = await self._create_graph()
         self._graph = graph_builder.compile(name=self.name)
@@ -69,7 +78,6 @@ class ResearcherAgent:
     async def agent_invoke(self, agent_input: dict[str, Any], session_id: str, user_id: Optional[int] = None) -> dict[str, Any]:
         """Invoke the researcher graph and return the raw output dict."""
         return await self._graph.ainvoke(input=agent_input)
-
 
     async def _researcher_node(self, state: ResearcherState, config: RunnableConfig) -> Command[Literal["researcher_tools"]]:
         """Individual researcher that conducts focused research on specific topics.
@@ -88,17 +96,9 @@ class ResearcherAgent:
         logger.info("node_start", node="researcher_node", tool_call_iterations=state.get("tool_call_iterations", 0))
         researcher_messages = state.get("researcher_messages", [])
 
-        tools = self.tools
-        if len(tools) == 0:
-            raise ValueError(
-                "No tools found to conduct research: Please configure your search API."
-            )
-
-
         researcher_prompt = research_system_prompt.format(date=get_today_str())
         messages = [SystemMessage(content=researcher_prompt)] + researcher_messages
-        researcher_model.bind_tools(tools)
-        response = await model_invoke_with_metrics(researcher_model, messages, RESEARCH_MODEL, self.name, config)
+        response = await model_invoke_with_metrics(self.researcher_model, messages, RESEARCH_MODEL, self.name, config)
         return Command(
             goto="researcher_tools",
             update={
@@ -156,7 +156,6 @@ class ResearcherAgent:
             update={"researcher_messages": tool_outputs}
         )
 
-
     async def _compress_research_node(self, state: ResearcherState, config: RunnableConfig):
         """Compress and synthesize research findings into a concise, structured summary.
 
@@ -168,7 +167,6 @@ class ResearcherAgent:
             Dictionary containing compressed research summary and raw notes
         """
         logger.info("node_start", node="_compress_research_node", tool_call_iterations=state.get("tool_call_iterations", 0))
-
 
         researcher_messages = state.get("researcher_messages", [])
         researcher_messages.append(HumanMessage(content=compress_research_simple_human_message))

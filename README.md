@@ -1,7 +1,7 @@
 # Agent Harness template - Production-Ready AI Agent Infrastructure
 
 A harness for building and running AI agents in production. 
-You define the agent logic; the harness provides authentication, memory, observability, state persistence, rate limiting, and monitoring out of the box.
+You define the agent logic; the harness provides authentication, memory, observability, state persistence, rate limiting, guardrails and monitoring out of the box.
 
 Built with **LangGraph**, **FastAPI**, **Langfuse**, **PostgreSQL + pgvector**, and **MCP**.
 
@@ -60,7 +60,8 @@ Your agent is a self-contained directory under `src/app/agents/`.  The harness h
 
 ## Build Your Own Agent
 
-Every agent lives in its own directory under `src/app/agents/`. The included `chatbot` agent is a working reference.
+Every agent lives in its own directory under `src/app/agents/`. 
+The included `chatbot`, `text_to_sql` and `open_deep_research` agents is a working reference.
 
 ### 1. Create the agent directory
 
@@ -162,7 +163,7 @@ make docker-compose-up ENV=development
 
 Monitoring endpoints:
 - Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000` (admin/admin)
+- Grafana: `http://localhost:3000/d/llm-latency/llm-observability` (admin/admin)
 
 ## Configuration
 

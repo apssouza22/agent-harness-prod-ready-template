@@ -20,44 +20,12 @@ Uses the [Chinook database](https://github.com/lerocha/chinook-database) - a sam
 
 ### Installation
 
-1. Clone the deepagents repository and navigate to this example:
-
-```bash
-git clone https://github.com/langchain-ai/deepagents.git
-cd deepagents/examples/text-to-sql-agent
-```
 
 1. Download the Chinook database:
 
 ```bash
 # Download the SQLite database file
 curl -L -o chinook.db https://github.com/lerocha/chinook-database/raw/master/ChinookDatabase/DataSources/Chinook_Sqlite.sqlite
-```
-
-## How the Deep Agent Works
-
-### Architecture
-
-```
-User Question
-     ↓
-Deep Agent (with planning)
-     ├─ write_todos (plan the approach)
-     ├─ SQL Tools
-     │  ├─ list_tables
-     │  ├─ get_schema
-     │  ├─ query_checker
-     │  └─ execute_query
-     ├─ Filesystem Tools (optional)
-     │  ├─ ls
-     │  ├─ read_file
-     │  ├─ write_file
-     │  └─ edit_file
-     └─ Subagent Spawning (optional)
-     ↓
-SQLite Database (Chinook)
-     ↓
-Formatted Answer
 ```
 
 ### Configuration
@@ -102,7 +70,7 @@ The agent will:
 4. Execute the query
 5. Format results with analysis
 
-## Deep Agent Output Example
+## Text to Sql Agent Output Example
 
 The Deep Agent shows its reasoning process:
 

@@ -23,7 +23,7 @@ from src.app.agents.open_deep_research.config import (
     MAX_CONCURRENT_RESEARCH_UNITS,
     MAX_RESEARCHER_ITERATIONS,
     RESEARCH_MODEL,
-    research_brief_model, clarification_model, final_report_model,
+    configurable_model, MAX_STRUCTURED_OUTPUT_RETRIES, research_model_config, writer_model_config,
 )
 from src.app.agents.open_deep_research.prompts import (
     clarify_with_user_instructions,
@@ -32,7 +32,7 @@ from src.app.agents.open_deep_research.prompts import (
     transform_messages_into_research_topic_prompt,
 )
 from src.app.agents.open_deep_research.state import (
-    AgentState,
+    AgentState, ClarifyWithUser, ResearchQuestion,
 )
 from src.app.core.common.token_limit import is_token_limit_exceeded, get_model_token_limit
 from src.app.core.common.utils import (
@@ -40,6 +40,21 @@ from src.app.core.common.utils import (
 )
 from src.app.core.llm.llm_utils import record_llm_error
 from src.app.core.metrics import model_invoke_with_metrics
+
+clarification_model = (
+    configurable_model
+    .with_structured_output(ClarifyWithUser)
+    .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
+    .with_config(research_model_config)
+)
+
+research_brief_model = (
+    configurable_model
+    .with_structured_output(ResearchQuestion)
+    .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
+    .with_config(research_model_config)
+)
+final_report_model = configurable_model.with_config(writer_model_config)
 
 
 async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Command[Literal["write_research_brief", "__end__"]]:

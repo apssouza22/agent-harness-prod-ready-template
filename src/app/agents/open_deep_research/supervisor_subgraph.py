@@ -22,7 +22,7 @@ from src.app.agents.open_deep_research.config import (
     MAX_CONCURRENT_RESEARCH_UNITS,
     MAX_RESEARCHER_ITERATIONS,
     RESEARCH_MODEL,
-    supervisor_model,
+    configurable_model, MAX_STRUCTURED_OUTPUT_RETRIES, research_model_config,
 )
 from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgent
 from src.app.agents.open_deep_research.state import (
@@ -55,6 +55,13 @@ class SupervisorAgent:
         self.tools = tools
         self._graph: Optional[CompiledStateGraph] = None
         self._researcher_agent: Optional[ResearcherAgent] = None
+
+        self.supervisor_model = (
+            configurable_model
+            .bind_tools(tools)
+            .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
+            .with_config(research_model_config)
+        )
 
     async def compile(self) -> CompiledStateGraph:
         graph_builder = await self._create_graph()
@@ -97,8 +104,7 @@ class SupervisorAgent:
         logger.info("node_start", node="_supervisor_node")
 
         supervisor_messages = state.get("supervisor_messages", [])
-        supervisor_model.tools(self.tools)
-        response = await model_invoke_with_metrics(supervisor_model, supervisor_messages, RESEARCH_MODEL, self.name)
+        response = await model_invoke_with_metrics(self.supervisor_model, supervisor_messages, RESEARCH_MODEL, self.name)
         return Command(
             goto="supervisor_tools",
             update={

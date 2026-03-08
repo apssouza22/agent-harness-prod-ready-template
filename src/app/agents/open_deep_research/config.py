@@ -47,7 +47,6 @@ configurable_model = init_chat_model(
     configurable_fields=("model", "max_tokens", "api_key"),
 )
 
-
 writer_model_config = {
     "model": FINAL_REPORT_MODEL,
     "max_tokens": FINAL_REPORT_MODEL_MAX_TOKENS,
@@ -59,40 +58,9 @@ research_model_config = {
     "max_tokens": RESEARCH_MODEL_MAX_TOKENS,
     "api_key": get_api_key_for_model(RESEARCH_MODEL),
 }
+
 compress_model_config = {
     "model": COMPRESSION_MODEL,
     "max_tokens": COMPRESSION_MODEL_MAX_TOKENS,
     "api_key": get_api_key_for_model(COMPRESSION_MODEL),
 }
-
-synthesizer_model = init_chat_model().with_config(compress_model_config)
-final_report_model = configurable_model.with_config(writer_model_config)
-
-research_brief_model = (
-    configurable_model
-    .with_structured_output(ResearchQuestion)
-    .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
-    .with_config(research_model_config)
-)
-
-clarification_model = (
-    configurable_model
-    .with_structured_output(ClarifyWithUser)
-    .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
-    .with_config(research_model_config)
-)
-
-
-researcher_model = (
-    configurable_model
-    .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
-    .with_config(research_model_config)
-)
-
-
-supervisor_model = (
-    configurable_model
-    .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
-    .with_config(research_model_config)
-)
-
