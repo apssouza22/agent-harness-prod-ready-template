@@ -1,8 +1,8 @@
-# Building a Production-Ready AI Agent Harness with LangGraph and FastAPI
+# Building a Production-Ready AI Agent Harness
 
-AI can write your agent in an afternoon. What it can't do is tell you what production looks like.
+Building an AI agent is 10% "The Brain" and 90% "The Plumbing." AI can write your agent in an afternoon. What it can't do is tell you what production looks like.
 
-It won't ask about authentication, rate limiting, or what happens when your LLM hallucinates a credit card number into a response. It won't wire up tracing, persist conversation state across restarts, or set up the metrics dashboard that tells you why latency spiked at 3 AM. That part is still on you.
+It won't ask about authentication, rate limiting, or what happens when your LLM hallucinates a credit card number into a response. It won't add guardrails that block prompt injection before the message reaches the model, or redact PII from the output before it reaches the user. It won't wire up tracing so you can replay exactly what the agent did six calls deep, persist conversation state across restarts, or set up the metrics dashboard that tells you why latency spiked at 3 AM. It won't build the eval pipeline that catches quality regressions before your users do, handle context overflow when a tool dumps 80,000 characters into the conversation, or add retry logic with exponential backoff so a single upstream timeout doesn't crash the entire session. That part is still on you.
 
 And yet, most LangGraph and LangChain tutorials stop right before any of this matters -- a working agent in a Jupyter notebook that answers questions, uses tools, and streams tokens. The gap between that demo and a service you'd actually deploy is enormous, and every team fills it by reinventing the same infrastructure from scratch.
 
@@ -11,7 +11,7 @@ An **agent harness** is the answer to this problem. Think of it like a test harn
 This matters because AI agents are not stateless functions. They hold conversations across sessions, remember user preferences, call unpredictable external tools, and produce outputs that need safety checks before reaching the user. Without a harness, every one of these concerns leaks into your agent code, turning a clean graph into a tangled mess of infrastructure that is impossible to reuse across agents.
 
 This article walks through the architecture of such a harness -- built with LangGraph, FastAPI, Langfuse, PostgreSQL with pgvector, MCP and AI Skills. The full implementation is open source. You define the agent logic, the harness provides everything else.
-langchain_core.messages.utils
+
 ```mermaid
 flowchart LR
   Client --> FastAPI
@@ -48,6 +48,7 @@ src/
 │   │   └── logging_context.py
 │   └── core/                # Shared infrastructure
 │       ├── guardrails/      # Input/output safety
+│       ├── context/         # LLM context overflow prevention
 │       ├── memory/          # Long-term memory (mem0)
 │       ├── checkpoint/      # State persistence
 │       ├── mcp/             # Model Context Protocol
@@ -425,7 +426,134 @@ The memory singleton connects to pgvector using the same PostgreSQL instance as 
 
 ---
 
-## 5. State Persistence: Conversation Checkpointing
+## 5. Context Management: Preventing LLM Context Overflow
+
+Long-running conversations and large tool results can push the message history past the model's context window. The harness addresses this with a two-layer strategy in `src/app/core/context/`: evict oversized tool results immediately, and summarize the conversation history before it overflows.
+
+### Layer 1: Tool Result Eviction
+
+When a tool returns a result exceeding ~80,000 characters (~20K tokens), the full output is written to disk and the in-state message is replaced with a compact head/tail preview:
+
+```python
+MAX_TOOL_RESULT_CHARS = 80_000
+PREVIEW_LINES = 5
+MAX_LINE_CHARS = 1_000
+
+def truncate_tool_call_if_too_long(tool_message: ToolMessage) -> ToolMessage:
+    content = tool_message.content
+    if not isinstance(content, str) or len(content) <= MAX_TOOL_RESULT_CHARS:
+        return tool_message
+
+    file_path = _write_large_result(tool_message.tool_call_id, content)
+    preview = _build_preview(content)
+
+    evicted_content = (
+        f"[Tool result too large ({len(content):,} chars). "
+        f"Full output saved to: {file_path}]\n\n"
+        f"--- Preview (first {PREVIEW_LINES} lines) ---\n"
+        f"{preview['head']}\n...\n"
+        f"--- Preview (last {PREVIEW_LINES} lines) ---\n"
+        f"{preview['tail']}\n\n"
+        f'Use read_file("{file_path}") to access the full content.'
+    )
+
+    return ToolMessage(content=evicted_content, name=tool_message.name, tool_call_id=tool_message.tool_call_id)
+```
+
+The preview gives the LLM enough context to decide whether it needs the full output. If it does, it can call `read_file` on the saved path to retrieve the content in chunks. This wrapping is applied at every tool-result creation site -- built-in tools, MCP tools, and parallel tool execution:
+
+```python
+# In the tool_call node
+outputs.append(truncate_tool_call_if_too_long(
+    ToolMessage(content=tool_result, name=tool_name, tool_call_id=tool_call["id"])
+))
+```
+
+### Layer 2: Conversation Summarization
+
+Even with tool results evicted, conversations accumulate context over many turns. The `summarize_if_too_long` function runs before every LLM call and triggers when the conversation reaches **85% of the model's context window**:
+
+```python
+async def _chat_node(self, state: GraphState, config: RunnableConfig) -> Command:
+    condensed_messages = await summarize_if_too_long(
+        messages=state.messages,
+        model_name=f"openai:{settings.DEFAULT_LLM_MODEL}",
+        llm=chatbot_model,
+        session_id=config["configurable"]["thread_id"],
+    )
+
+    system_prompt = load_system_prompt(long_term_memory=state.long_term_memory)
+    messages = prepare_messages(condensed_messages, chatbot_model, system_prompt)
+    # ... LLM call ...
+```
+
+Token counting uses `count_tokens_approximately` from langchain-core for the threshold check. The cheaper character-based heuristic (`NUM_CHARS_PER_TOKEN = 4`) is used for the split-point search and argument truncation to avoid repeated full counts.
+
+The function is a no-op when the context is within budget. When it triggers, it proceeds in two stages:
+
+**Stage 1 -- Lightweight truncation (no LLM call).** Tool-call arguments in older messages -- like file contents passed to `write_file` -- are truncated to 2K characters. If this alone brings the count below the threshold, no summarization is needed:
+
+```python
+def _truncate_tool_call_args(messages: list[BaseMessage]) -> list[BaseMessage]:
+    result = []
+    for msg in messages:
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            truncated_calls = []
+            for tc in msg.tool_calls:
+                new_args = {}
+                for key, value in tc.get("args", {}).items():
+                    if isinstance(value, str) and len(value) > TOOL_ARG_TRUNCATE_CHARS:
+                        new_args[key] = value[:TOOL_ARG_TRUNCATE_CHARS] + f"\n... [truncated, {len(value):,} chars total]"
+                    else:
+                        new_args[key] = value
+                truncated_calls.append({**tc, "args": new_args})
+            result.append(msg.model_copy(update={"tool_calls": truncated_calls}))
+        else:
+            result.append(msg)
+    return result
+```
+
+**Stage 2 -- Full summarization.** If truncation was not enough, the conversation is split into "old" and "recent" segments. The split snaps to a `HumanMessage` boundary so tool-call chains are never broken. The old segment is written in full to a markdown file, and an LLM generates a concise summary that replaces it:
+
+```python
+file_path = _write_messages_to_markdown(old_messages, session_id)
+summary_text = await _generate_summary(truncated_old, llm)
+
+summary_message = HumanMessage(
+    content=(
+        f"[Summary of earlier conversation ({len(old_messages)} messages). "
+        f"Full transcript: {file_path}]\n\n{summary_text}"
+    )
+)
+
+return [summary_message] + recent_messages
+```
+
+The split-point algorithm walks backward from the end of the message list, accumulating characters until it fills ~30% of the model's context window for the "recent" portion. It then snaps forward to the next `HumanMessage` to find a clean boundary:
+
+```python
+def _find_safe_split_index(messages, token_limit):
+    recent_chars_budget = int(token_limit * RECENT_CONTEXT_RATIO * NUM_CHARS_PER_TOKEN)
+    chars_from_end = 0
+
+    for i in range(len(messages) - 1, -1, -1):
+        chars_from_end += _estimate_message_chars(messages[i])
+        if chars_from_end >= recent_chars_budget:
+            raw_split = i + 1
+            break
+
+    # Snap to nearest HumanMessage boundary
+    for j in range(raw_split, len(messages)):
+        if isinstance(messages[j], HumanMessage):
+            return j
+    return 0
+```
+
+If the summarization LLM call itself fails, the function falls back to a plain message-role listing so the conversation can continue without crashing. The full old messages are always preserved in the markdown file regardless of whether the LLM summary succeeds.
+
+---
+
+## 6. State Persistence: Conversation Checkpointing
 
 LangGraph's `AsyncPostgresSaver` automatically persists the full graph state after every node execution. This means conversations survive server restarts and can be resumed from exactly where they left off.
 
@@ -465,7 +593,7 @@ async def clear_checkpoints(session_id: str) -> None:
 
 ---
 
-## 6. Authentication and Session Management
+## 7. Authentication and Session Management
 
 The harness uses JWT-based authentication with a session-per-conversation model. Users register, log in to get a user-scoped token, then create sessions -- each session represents a separate conversation thread.
 
@@ -497,7 +625,7 @@ All user input passes through sanitization that strips HTML, removes `<script>` 
 
 ---
 
-## 7. Observability: Tracing, Metrics, and Structured Logging
+## 8. Observability: Tracing, Metrics, and Structured Logging
 
 Production observability requires three complementary systems. The harness integrates all three.
 
@@ -585,7 +713,7 @@ The logging format switches automatically based on environment: colored console 
 
 ---
 
-## 8. The API Layer: FastAPI Endpoints and Streaming
+## 9. The API Layer: FastAPI Endpoints and Streaming
 
 The API provides both synchronous and streaming (SSE) endpoints for chat. The streaming endpoint uses FastAPI's `StreamingResponse` with an async generator:
 
@@ -631,7 +759,7 @@ app.add_middleware(MetricsMiddleware)
 
 ---
 
-## 9. MCP Integration: Model Context Protocol
+## 10. MCP Integration: Model Context Protocol
 
 The harness supports MCP (Model Context Protocol) for dynamically loading tools from external servers. MCP sessions are initialized at application startup and persist for the application lifetime.
 
@@ -670,7 +798,7 @@ def _get_all_tools(self) -> list[BaseTool]:
 
 ---
 
-## 10. Evaluation Framework: LLM-as-Judge
+## 11. Evaluation Framework: LLM-as-Judge
 
 The harness includes a metric-based evaluation framework that uses Langfuse traces as its data source and an LLM as the judge.
 
@@ -720,7 +848,7 @@ make eval-no-report    # Skip report generation
 
 ---
 
-## 11. Configuration and Environment Management
+## 12. Configuration and Environment Management
 
 The harness uses environment-specific configuration files loaded in priority order:
 
@@ -750,7 +878,7 @@ Explicit environment variables always take precedence over these defaults, so yo
 
 ---
 
-## 12. DevOps: Docker, Compose, and CI/CD
+## 13. DevOps: Docker, Compose, and CI/CD
 
 The Dockerfile uses a slim Python base with a non-root user for security:
 
@@ -788,7 +916,7 @@ make lint                             # Ruff check and format
 
 ---
 
-## 13. Building Your Own Agent
+## 14. Building Your Own Agent
 
 Every agent lives in its own directory. Start by choosing the architecture that fits your use case -- refer to the comparison in section 2 -- then follow the pattern from the matching reference agent.
 
@@ -864,7 +992,7 @@ The harness handles everything else: auth, memory retrieval and update, checkpoi
 
 ---
 
-## 14. Production Readiness Checklist
+## 15. Production Readiness Checklist
 
 Here is a summary of the production concerns addressed by the harness:
 
@@ -874,6 +1002,7 @@ Here is a summary of the production concerns addressed by the harness:
 | **Input guardrails** | Content filter, prompt injection detection, PII blocking |
 | **Output guardrails** | PII redaction, LLM-based safety evaluation |
 | **Long-term memory** | mem0 + pgvector, per-user, non-blocking updates |
+| **Context management** | Tool-result eviction to disk, two-stage conversation summarization |
 | **State persistence** | LangGraph AsyncPostgresSaver with automatic checkpointing |
 | **Observability** | Langfuse tracing, Prometheus metrics, structlog logging |
 | **Rate limiting** | Per-endpoint limits via slowapi, configurable per environment |
