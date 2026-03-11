@@ -1,10 +1,16 @@
 # Building a Production-Ready AI Agent Harness with LangGraph and FastAPI
 
-Most LangGraph and LangChain tutorials end the same way: a working agent in a Jupyter notebook. It answers questions. It uses tools. It streams tokens. Ship it, right?
+AI can write your agent in an afternoon. What it can't do is tell you what production looks like.
 
-Not quite. Between that notebook and a production service sit dozens of cross-cutting concerns that have nothing to do with your agent's logic: authentication, rate limiting, conversation persistence, long-term memory, input/output guardrails, observability, metrics, evaluation, and deployment. Every team reinvents this infrastructure from scratch.
+It won't ask about authentication, rate limiting, or what happens when your LLM hallucinates a credit card number into a response. It won't wire up tracing, persist conversation state across restarts, or set up the metrics dashboard that tells you why latency spiked at 3 AM. That part is still on you.
 
-This article walks through the architecture of an **agent harness** -- a reusable infrastructure layer where you define the agent logic and the harness provides everything else. The full implementation is open source and built with LangGraph, FastAPI, Langfuse, PostgreSQL with pgvector, and MCP.
+And yet, most LangGraph and LangChain tutorials stop right before any of this matters -- a working agent in a Jupyter notebook that answers questions, uses tools, and streams tokens. The gap between that demo and a service you'd actually deploy is enormous, and every team fills it by reinventing the same infrastructure from scratch.
+
+An **agent harness** is the answer to this problem. Think of it like a test harness, but for production concerns instead of assertions. It is the infrastructure shell that wraps around your agent -- handling authentication, guardrails, memory, state persistence, observability, and deployment -- so the agent itself only contains the logic that makes it unique. You write the brain; the harness provides the skeleton, the nervous system, and the immune system.
+
+This matters because AI agents are not stateless functions. They hold conversations across sessions, remember user preferences, call unpredictable external tools, and produce outputs that need safety checks before reaching the user. Without a harness, every one of these concerns leaks into your agent code, turning a clean graph into a tangled mess of infrastructure that is impossible to reuse across agents.
+
+This article walks through the architecture of such a harness -- built with LangGraph, FastAPI, Langfuse, PostgreSQL with pgvector, MCP and AI Skills. The full implementation is open source. You define the agent logic, the harness provides everything else.
 
 ```mermaid
 flowchart LR
@@ -235,6 +241,39 @@ The agent is configured through markdown files rather than code:
 - **`AGENTS.md`** -- Agent identity, role definition, safety rules (read-only SQL access), and planning strategies
 - **`skills/`** -- Specialized workflows defined as markdown skill files (schema-exploration, query-writing)
 - **`FilesystemBackend`** -- Persistent storage for intermediate results and planning artifacts
+
+#### Skills: Extending Agents with Natural Language
+
+Skills are emerging as a modern pattern for extending agent capabilities -- and for good reason. Instead of writing new Python functions or graph nodes, you define a skill as a markdown file that describes *when* to activate and *how* to execute a workflow. The agent reads skill descriptions in its context and loads the full instructions on demand, only when the task requires it.
+
+The text-to-SQL agent ships with two skills. The **schema-exploration** skill teaches the agent how to discover database structure:
+
+```markdown
+---
+name: schema-exploration
+description: For discovering and understanding database structure, tables, columns, and relationships
+---
+
+## When to Use This Skill
+Use this skill when you need to:
+- Understand the database structure
+- Find which tables contain certain types of data
+- Discover column names and data types
+
+## Workflow
+### 1. List All Tables
+Use `sql_db_list_tables` tool to see all available tables in the database.
+
+### 2. Get Schema for Specific Tables
+Use `sql_db_schema` tool with table names to examine columns, data types, and relationships.
+
+### 3. Map Relationships
+Identify how tables connect via foreign keys.
+```
+
+The **query-writing** skill teaches the agent a structured approach to SQL generation -- planning with `write_todos` for complex queries, validating JOIN conditions, and enforcing safety rules like `LIMIT` clauses and read-only access.
+
+This is **progressive disclosure** applied to agent design. The agent always sees the skill names and descriptions, but it only loads the full multi-page instructions when it decides a skill is relevant. This keeps the context window lean for simple questions while providing deep, step-by-step expertise for complex ones. Adding a new capability is as simple as dropping a new `.md` file into the `skills/` directory -- no code changes, no redeployment, no graph rewiring.
 
 The wrapper class applies the same harness guardrails (content filter, PII blocking, output safety check) before and after the ReAct loop:
 
@@ -478,6 +517,10 @@ self._config = {
 
 This captures the full chain of LLM calls, tool invocations, token usage, and latency for every conversation turn -- without modifying agent code.
 
+![Langfuse tracing view showing the full call hierarchy, tool invocations, and graph visualization for an agent execution](assets/traces.png)
+
+![Langfuse dashboard showing traces, model costs, usage by model, and user consumption](assets/langfuse-dashboard.png)
+
 ### Prometheus Metrics
 
 Custom metrics track both infrastructure and LLM-specific performance:
@@ -511,6 +554,8 @@ async def model_invoke_with_metrics(model, model_input, model_name, agent_name, 
 ```
 
 HTTP metrics are captured automatically by `MetricsMiddleware`, tracking request duration, counts, and status codes by endpoint.
+
+![Grafana LLM Observability dashboard showing token usage, error rates, and tool execution metrics](assets/graphana_metrics.png)
 
 ### Structured Logging
 
