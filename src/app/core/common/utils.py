@@ -8,6 +8,7 @@ from langchain_core.messages import (
 )
 
 from src.app.core.common.logging import logger
+from src.app.core.context import truncate_tool_call_if_too_long
 from src.app.core.metrics.metrics import tool_executions_total
 
 
@@ -62,11 +63,11 @@ async def execute_tools(config, most_recent_message, tools_by_name):
     ]
     observations = await asyncio.gather(*tool_execution_tasks)
     tool_outputs = [
-        ToolMessage(
+        truncate_tool_call_if_too_long(ToolMessage(
             content=observation,
             name=tool_call["name"],
-            tool_call_id=tool_call["id"]
-        )
+            tool_call_id=tool_call["id"],
+        ))
         for observation, tool_call in zip(observations, tool_calls)
     ]
     return tool_outputs

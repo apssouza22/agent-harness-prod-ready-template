@@ -11,7 +11,7 @@ An **agent harness** is the answer to this problem. Think of it like a test harn
 This matters because AI agents are not stateless functions. They hold conversations across sessions, remember user preferences, call unpredictable external tools, and produce outputs that need safety checks before reaching the user. Without a harness, every one of these concerns leaks into your agent code, turning a clean graph into a tangled mess of infrastructure that is impossible to reuse across agents.
 
 This article walks through the architecture of such a harness -- built with LangGraph, FastAPI, Langfuse, PostgreSQL with pgvector, MCP and AI Skills. The full implementation is open source. You define the agent logic, the harness provides everything else.
-
+langchain_core.messages.utils
 ```mermaid
 flowchart LR
   Client --> FastAPI

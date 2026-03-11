@@ -19,6 +19,7 @@ from src.app.core.metrics.metrics import tool_executions_total
 from src.app.core.common.model.graph import GraphState
 from src.app.core.common.model.message import Message
 from src.app.core.llm.llm_utils import dump_messages, prepare_messages, process_llm_response, record_llm_error
+from src.app.core.context import summarize_if_too_long, truncate_tool_call_if_too_long
 from src.app.core.mcp.mcp_utils import handle_mcp_tool_call
 from src.app.core.mcp.session_manager import get_mcp_session_manager
 from src.app.core.memory.memory import get_relevant_memory, bg_update_memory
@@ -202,13 +203,13 @@ class AgentChatbot:
                     except Exception as tool_error:
                         tool_executions_total.labels(tool_name=tool_name, status="error").inc()
                         raise tool_error
-                    outputs.append(
+                    outputs.append(truncate_tool_call_if_too_long(
                         ToolMessage(
                             content=tool_result,
                             name=tool_name,
                             tool_call_id=tool_call["id"],
                         )
-                    )
+                    ))
                 elif tool_name in self.mcp_tools_by_name:
                     tool_fn = self.mcp_tools_by_name[tool_name]
                     tool_message = await handle_mcp_tool_call(
@@ -218,7 +219,7 @@ class AgentChatbot:
                         max_retries=1,
                         on_reconnect=self._load_mcp_tools,
                     )
-                    outputs.append(tool_message)
+                    outputs.append(truncate_tool_call_if_too_long(tool_message))
 
         except Exception as e:
             logger.error("tool_call_processing_failed", error=str(e))
@@ -235,8 +236,15 @@ class AgentChatbot:
         Returns:
             Command: Command object with updated state and next node to execute.
         """
+        condensed_messages = await summarize_if_too_long(
+            messages=state.messages,
+            model_name=f"openai:{settings.DEFAULT_LLM_MODEL}",
+            llm=chatbot_model,
+            session_id=config["configurable"]["thread_id"],
+        )
+
         system_prompt = load_system_prompt(long_term_memory=state.long_term_memory)
-        messages = prepare_messages(state.messages, chatbot_model, system_prompt)
+        messages = prepare_messages(condensed_messages, chatbot_model, system_prompt)
 
         model = (
             chatbot_model

@@ -26,3 +26,5 @@ src/evals/reports/
 /.vscode/
 /.claude/
 logs/
+large_tool_results/
+conversation_summaries/

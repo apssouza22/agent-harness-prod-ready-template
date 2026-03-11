@@ -6,6 +6,7 @@ from anyio import ClosedResourceError
 from langchain_core.messages import ToolMessage
 
 from src.app.core.common.logging import bind_context, logger
+from src.app.core.context import truncate_tool_call_if_too_long
 from src.app.core.mcp.session_manager import generate_correlation_id, get_mcp_session_manager
 from src.app.core.metrics.metrics import tool_executions_total
 
@@ -59,11 +60,11 @@ async def handle_mcp_tool_call(
                 tool_call_id=tool_call["id"],
                 attempt=attempt + 1,
             )
-            return ToolMessage(
+            return truncate_tool_call_if_too_long(ToolMessage(
                 content=tool_result,
                 name=tool_name,
                 tool_call_id=tool_call["id"],
-            )
+            ))
 
         except Exception as tool_error:
             # Check if it's a ClosedResourceError and we can retry
