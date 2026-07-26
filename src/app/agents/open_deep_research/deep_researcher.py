@@ -23,7 +23,7 @@ from src.app.agents.open_deep_research.config import (
     MAX_CONCURRENT_RESEARCH_UNITS,
     MAX_RESEARCHER_ITERATIONS,
     RESEARCH_MODEL,
-    configurable_model, MAX_STRUCTURED_OUTPUT_RETRIES, research_model_config, writer_model_config,
+    configurable_model, research_model_config, writer_model_config,
 )
 from src.app.agents.open_deep_research.prompts import (
     clarify_with_user_instructions,
@@ -44,14 +44,12 @@ from src.app.core.metrics import model_invoke_with_metrics
 clarification_model = (
     configurable_model
     .with_structured_output(ClarifyWithUser)
-    .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
     .with_config(research_model_config)
 )
 
 research_brief_model = (
     configurable_model
     .with_structured_output(ResearchQuestion)
-    .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
     .with_config(research_model_config)
 )
 final_report_model = configurable_model.with_config(writer_model_config)

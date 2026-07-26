@@ -1,0 +1,22 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "providers": {
+    "openai": {
+      "keys": [
+        {
+          "name": "openai-key-1",
+          "value": "env.OPENAI_API_KEY",
+          "models": [],
+          "weight": 1.0
+        }
+      ]
+    }
+  },
+  "config_store": {
+    "enabled": true,
+    "type": "sqlite",
+    "config": {
+      "path": "./config.db"
+    }
+  }
+}

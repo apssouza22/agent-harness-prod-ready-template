@@ -70,6 +70,8 @@ class AgentState(MessagesState):
     raw_notes: Annotated[list[str], override_reducer] = []
     notes: Annotated[list[str], override_reducer] = []
     final_report: str
+    last_node_error: Optional[str]
+    failed_node: Optional[str]
 
 class SupervisorState(TypedDict):
     """State for the supervisor that manages research tasks."""

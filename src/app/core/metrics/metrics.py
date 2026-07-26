@@ -78,3 +78,9 @@ guardrail_requests_blocked_total = Counter(
     "Total requests blocked or modified by guardrails",
     ["guardrail_type", "reason"],
 )
+
+graph_node_failures_total = Counter(
+    "graph_node_failures_total",
+    "Graph node failures after retry exhaustion",
+    ["agent_name", "node"],
+)

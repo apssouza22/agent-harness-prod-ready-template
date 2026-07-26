@@ -7,7 +7,7 @@ LangGraph subgraph.
 
 from typing import Any, Literal, Optional
 
-from langchain.chat_models import init_chat_model
+from src.app.core.llm.factory import create_chat_model
 from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
@@ -23,7 +23,14 @@ from src.app.agents.open_deep_research.config import (
     COMPRESSION_MODEL,
     MAX_REACT_TOOL_CALLS,
     RESEARCH_MODEL,
-    configurable_model, MAX_STRUCTURED_OUTPUT_RETRIES, research_model_config, compress_model_config,
+    configurable_model, research_model_config, compress_model_config,
+)
+from src.app.core.fault_tolerance import (
+    create_deep_research_error_handler,
+    get_llm_retry_policy,
+    get_llm_timeout_policy,
+    get_tool_retry_policy,
+    get_tool_timeout_policy,
 )
 from src.app.agents.open_deep_research.prompts import (
     compress_research_simple_human_message,
@@ -46,7 +53,7 @@ from src.app.core.common.utils import get_today_str, execute_tools
 from src.app.core.llm.llm_utils import record_llm_error
 from src.app.core.metrics import model_invoke_with_metrics
 
-synthesizer_model = init_chat_model().with_config(compress_model_config)
+synthesizer_model = create_chat_model(model=COMPRESSION_MODEL).with_config(compress_model_config)
 
 
 class ResearcherAgent:
@@ -65,7 +72,6 @@ class ResearcherAgent:
         self.researcher_model = (
             configurable_model
             .bind_tools(tools)
-            .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
             .with_config(research_model_config)
         )
 
@@ -221,9 +227,23 @@ class ResearcherAgent:
                 ResearcherState,
                 output=ResearcherOutputState,
             )
+            graph_builder.set_node_defaults(
+                retry_policy=get_llm_retry_policy(),
+                timeout=get_llm_timeout_policy(),
+                error_handler=create_deep_research_error_handler(
+                    agent_name=self.name,
+                    model_name=RESEARCH_MODEL,
+                    fallback_goto=END,
+                ),
+            )
 
             graph_builder.add_node("researcher", self._researcher_node)
-            graph_builder.add_node("researcher_tools", self._researcher_tools_node)
+            graph_builder.add_node(
+                "researcher_tools",
+                self._researcher_tools_node,
+                retry_policy=get_tool_retry_policy(),
+                timeout=get_tool_timeout_policy(),
+            )
             graph_builder.add_node("compress_research", self._compress_research_node)
 
             graph_builder.add_edge(START, "researcher")

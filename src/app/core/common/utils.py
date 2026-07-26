@@ -23,14 +23,9 @@ def get_today_str() -> str:
 
 def get_api_key_for_model(model_name: str):
     """Get API key for a specific model from environment or config."""
-    model_name = model_name.lower()
-    if model_name.startswith("openai:"):
-        return os.getenv("OPENAI_API_KEY")
-    elif model_name.startswith("anthropic:"):
-        return os.getenv("ANTHROPIC_API_KEY")
-    elif model_name.startswith("google"):
-        return os.getenv("GOOGLE_API_KEY")
-    return None
+    from src.app.core.llm.factory import resolve_api_key_for_model
+
+    return resolve_api_key_for_model(model_name)
 
 
 def get_notes_from_tool_calls(messages: list[MessageLikeRepresentation]):

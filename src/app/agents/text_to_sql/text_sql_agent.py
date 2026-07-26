@@ -6,8 +6,7 @@ from deepagents.backends import FilesystemBackend
 from langchain.agents.middleware import PIIMiddleware
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
-from langchain_openai import ChatOpenAI
-
+from src.app.core.llm.factory import create_openai_chat_model
 from src.app.core.middleware import (
     AgentContext,
     AgentPipeline,
@@ -74,7 +73,7 @@ def create_sql_deep_agent():
     db_path = os.path.join(base_dir, "chinook.db")
     db = SQLDatabase.from_uri(f"sqlite:///{db_path}", sample_rows_in_table_info=3)
 
-    model = ChatOpenAI(model="gpt-5-mini", reasoning={"effort": "medium"}, temperature=0)
+    model = create_openai_chat_model(model="gpt-5-mini", reasoning={"effort": "medium"}, temperature=0)
 
     # Create SQL toolkit and get tools
     toolkit = SQLDatabaseToolkit(db=db, llm=model)

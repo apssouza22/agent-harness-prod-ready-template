@@ -29,15 +29,23 @@ from src.app.core.metrics.metrics import tool_executions_total
 from src.app.core.common.model.graph import GraphState
 from src.app.core.common.model.message import Message
 from src.app.core.llm.llm_utils import dump_messages, process_llm_response, record_llm_error
+from src.app.core.fault_tolerance import (
+    create_chat_node_error_handler,
+    create_tool_node_error_handler,
+    get_llm_retry_policy,
+    get_llm_timeout_policy,
+    get_tool_retry_policy,
+    get_tool_timeout_policy,
+)
 from src.app.core.context import truncate_tool_call_if_too_long
 from src.app.core.mcp.mcp_utils import handle_mcp_tool_call
 from src.app.core.mcp.session_manager import get_mcp_session_manager
 from src.app.core.memory.memory import bg_update_memory, get_relevant_memory
 
-from langchain.chat_models import init_chat_model
+from src.app.core.llm.factory import create_chat_model
 
 
-chatbot_model = init_chat_model(
+chatbot_model = create_chat_model(
     model=f"openai:{settings.DEFAULT_LLM_MODEL}",
     api_key=settings.OPENAI_API_KEY,
     max_tokens=settings.MAX_TOKENS,
@@ -244,6 +252,7 @@ class AgentChatbot:
 
         except Exception as e:
             logger.error("tool_call_processing_failed", error=str(e))
+            raise
 
         return Command(update={"messages": outputs}, goto="chat")
 
@@ -261,41 +270,28 @@ class AgentChatbot:
         system_prompt = load_system_prompt(long_term_memory=state.long_term_memory)
         prepared = [SystemMessage(content=system_prompt)] + list(messages)
 
-        model = (
-            chatbot_model
-            .bind_tools(self._get_all_tools())
-            .with_retry(stop_after_attempt=3)
+        model = chatbot_model.bind_tools(self._get_all_tools())
+
+        response_message = await model_invoke_with_metrics(
+            model, prepared, settings.DEFAULT_LLM_MODEL, self.name, config
         )
 
-        try:
-            response_message = await model_invoke_with_metrics(model, prepared, settings.DEFAULT_LLM_MODEL, self.name, config)
-
-            if ctx:
-                response_message = await manager.run_after_model_call(
-                    ctx, response=response_message, model_name=settings.DEFAULT_LLM_MODEL,
-                )
-
-            response_message = process_llm_response(response_message)
-            logger.info(
-                "llm_response_generated",
-                session_id=config["configurable"]["thread_id"],
-                model=settings.DEFAULT_LLM_MODEL,
-                environment=settings.ENVIRONMENT.value,
+        if ctx:
+            response_message = await manager.run_after_model_call(
+                ctx, response=response_message, model_name=settings.DEFAULT_LLM_MODEL,
             )
 
-            goto = "tool_call" if response_message.tool_calls else "output_guardrail"
+        response_message = process_llm_response(response_message)
+        logger.info(
+            "llm_response_generated",
+            session_id=config["configurable"]["thread_id"],
+            model=settings.DEFAULT_LLM_MODEL,
+            environment=settings.ENVIRONMENT.value,
+        )
 
-            return Command(update={"messages": [response_message]}, goto=goto)
-        except Exception as e:
-            record_llm_error(settings.DEFAULT_LLM_MODEL, self.name)
-            logger.error(
-                "llm_call_failed",
-                session_id=config["configurable"]["thread_id"],
-                model=settings.DEFAULT_LLM_MODEL,
-                error=str(e),
-                environment=settings.ENVIRONMENT.value,
-            )
-            raise
+        goto = "tool_call" if response_message.tool_calls else "output_guardrail"
+
+        return Command(update={"messages": [response_message]}, goto=goto)
 
     async def _create_graph(self) -> StateGraph:
         try:
@@ -304,8 +300,29 @@ class AgentChatbot:
 
             graph_builder = StateGraph(GraphState)
             graph_builder.add_node("input_guardrail", input_guardrail, ends=["chat", END])
-            graph_builder.add_node("chat", self._chat_node, ends=["tool_call", "output_guardrail"])
-            graph_builder.add_node("tool_call", self._tool_call_node, ends=["chat"])
+            graph_builder.add_node(
+                "chat",
+                self._chat_node,
+                ends=["tool_call", "output_guardrail"],
+                retry_policy=get_llm_retry_policy(),
+                timeout=get_llm_timeout_policy(),
+                error_handler=create_chat_node_error_handler(
+                    agent_name=self.name,
+                    model_name=settings.DEFAULT_LLM_MODEL,
+                    fallback_goto="output_guardrail",
+                ),
+            )
+            graph_builder.add_node(
+                "tool_call",
+                self._tool_call_node,
+                ends=["chat"],
+                retry_policy=get_tool_retry_policy(),
+                timeout=get_tool_timeout_policy(),
+                error_handler=create_tool_node_error_handler(
+                    agent_name=self.name,
+                    fallback_goto="chat",
+                ),
+            )
             graph_builder.add_node("output_guardrail", output_guardrail)
             graph_builder.set_entry_point("input_guardrail")
             graph_builder.add_edge("output_guardrail", END)

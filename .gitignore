@@ -28,3 +28,4 @@ src/evals/reports/
 logs/
 large_tool_results/
 conversation_summaries/
+/.agent/plans/

@@ -16,3 +16,5 @@ class GraphState(BaseModel):
         default_factory=list, description="The messages in the conversation"
     )
     long_term_memory: str = Field(default="", description="The long term memory of the conversation")
+    last_node_error: str = Field(default="", description="Last graph node error after retry exhaustion")
+    failed_node: str = Field(default="", description="Name of the last graph node that failed")

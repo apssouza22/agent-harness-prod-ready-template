@@ -141,10 +141,32 @@ class Settings:
 
         # LangGraph Configuration
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+        self.ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+        self.GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+
+        # Bifrost API Gateway (https://docs.getbifrost.ai/integrations/langchain-sdk)
+        self.BIFROST_ENABLED = os.getenv("BIFROST_ENABLED", "false").lower() in ("true", "1", "t", "yes")
+        self.BIFROST_BASE_URL = os.getenv("BIFROST_BASE_URL", "http://localhost:8080/langchain")
+        self.BIFROST_OPENAI_BASE_URL = os.getenv("BIFROST_OPENAI_BASE_URL", "http://localhost:8080/v1")
+        self.BIFROST_API_KEY = os.getenv("BIFROST_API_KEY", "dummy-key")
+        self.BIFROST_VIRTUAL_KEY = os.getenv("BIFROST_VIRTUAL_KEY", "")
+
         self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-5-mini")
         self.DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))
         self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))
         self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "3"))
+
+        # LangGraph fault tolerance (RetryPolicy, TimeoutPolicy, error handlers)
+        self.GRAPH_LLM_RETRY_MAX_ATTEMPTS = int(os.getenv("GRAPH_LLM_RETRY_MAX_ATTEMPTS", "3"))
+        self.GRAPH_TOOL_RETRY_MAX_ATTEMPTS = int(os.getenv("GRAPH_TOOL_RETRY_MAX_ATTEMPTS", "2"))
+        self.GRAPH_RETRY_INITIAL_INTERVAL = float(os.getenv("GRAPH_RETRY_INITIAL_INTERVAL", "0.5"))
+        self.GRAPH_RETRY_BACKOFF_FACTOR = float(os.getenv("GRAPH_RETRY_BACKOFF_FACTOR", "2.0"))
+        self.GRAPH_RETRY_MAX_INTERVAL = float(os.getenv("GRAPH_RETRY_MAX_INTERVAL", "128.0"))
+        self.GRAPH_RETRY_JITTER = os.getenv("GRAPH_RETRY_JITTER", "true").lower() in ("true", "1", "t", "yes")
+        self.GRAPH_LLM_RUN_TIMEOUT = float(os.getenv("GRAPH_LLM_RUN_TIMEOUT", "120"))
+        self.GRAPH_LLM_IDLE_TIMEOUT = float(os.getenv("GRAPH_LLM_IDLE_TIMEOUT", "30"))
+        self.GRAPH_TOOL_RUN_TIMEOUT = float(os.getenv("GRAPH_TOOL_RUN_TIMEOUT", "180"))
+        self.GRAPH_TOOL_IDLE_TIMEOUT = float(os.getenv("GRAPH_TOOL_IDLE_TIMEOUT", "60"))
 
         # Long term memory Configuration
         self.LONG_TERM_MEMORY_MODEL = os.getenv("LONG_TERM_MEMORY_MODEL", "gpt-5-nano")

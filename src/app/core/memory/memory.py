@@ -10,6 +10,7 @@ from mem0 import AsyncMemory
 
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
+from src.app.core.llm.factory import build_mem0_openai_config
 
 # Module-level singleton for memory instance
 _memory_instance: Optional[AsyncMemory] = None
@@ -23,6 +24,7 @@ async def get_memory_instance() -> AsyncMemory:
     """
     global _memory_instance
     if _memory_instance is None:
+        mem0_openai_config = build_mem0_openai_config()
         _memory_instance = await AsyncMemory.from_config(
             config_dict={
                 "vector_store": {
@@ -38,9 +40,18 @@ async def get_memory_instance() -> AsyncMemory:
                 },
                 "llm": {
                     "provider": "openai",
-                    "config": {"model": settings.LONG_TERM_MEMORY_MODEL},
+                    "config": {
+                        "model": settings.LONG_TERM_MEMORY_MODEL,
+                        **mem0_openai_config,
+                    },
                 },
-                "embedder": {"provider": "openai", "config": {"model": settings.LONG_TERM_MEMORY_EMBEDDER_MODEL}},
+                "embedder": {
+                    "provider": "openai",
+                    "config": {
+                        "model": settings.LONG_TERM_MEMORY_EMBEDDER_MODEL,
+                        **mem0_openai_config,
+                    },
+                },
                 # "custom_fact_extraction_prompt": load_custom_fact_extraction_prompt(),
             }
         )

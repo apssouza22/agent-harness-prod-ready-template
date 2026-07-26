@@ -22,7 +22,14 @@ from src.app.agents.open_deep_research.config import (
     MAX_CONCURRENT_RESEARCH_UNITS,
     MAX_RESEARCHER_ITERATIONS,
     RESEARCH_MODEL,
-    configurable_model, MAX_STRUCTURED_OUTPUT_RETRIES, research_model_config,
+    configurable_model, research_model_config,
+)
+from src.app.core.fault_tolerance import (
+    create_deep_research_error_handler,
+    get_llm_retry_policy,
+    get_llm_timeout_policy,
+    get_tool_retry_policy,
+    get_tool_timeout_policy,
 )
 from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgent
 from src.app.agents.open_deep_research.state import (
@@ -59,7 +66,6 @@ class SupervisorAgent:
         self.supervisor_model = (
             configurable_model
             .bind_tools(tools)
-            .with_retry(stop_after_attempt=MAX_STRUCTURED_OUTPUT_RETRIES)
             .with_config(research_model_config)
         )
 
@@ -197,9 +203,28 @@ class SupervisorAgent:
         """
         try:
             graph_builder = StateGraph(SupervisorState)
+            graph_builder.set_node_defaults(
+                retry_policy=get_llm_retry_policy(),
+                timeout=get_llm_timeout_policy(),
+                error_handler=create_deep_research_error_handler(
+                    agent_name=self.name,
+                    model_name=RESEARCH_MODEL,
+                    fallback_goto=END,
+                ),
+            )
 
-            graph_builder.add_node("supervisor", self._supervisor_node)
-            graph_builder.add_node("supervisor_tools", self._supervisor_tools_node)
+            graph_builder.add_node(
+                "supervisor",
+                self._supervisor_node,
+                retry_policy=get_llm_retry_policy(),
+                timeout=get_llm_timeout_policy(),
+            )
+            graph_builder.add_node(
+                "supervisor_tools",
+                self._supervisor_tools_node,
+                retry_policy=get_tool_retry_policy(),
+                timeout=get_tool_timeout_policy(),
+            )
 
             graph_builder.add_edge(START, "supervisor")
 

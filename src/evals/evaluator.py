@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
+from src.app.core.llm.factory import build_openai_client_kwargs
 from src.evals.helpers import (
     calculate_avg_scores,
     generate_report,
@@ -41,7 +42,12 @@ class Evaluator:
 
     def __init__(self):
         """Initialize Evaluator with OpenAI and Langfuse clients."""
-        self.client = openai.AsyncOpenAI(api_key=settings.EVALUATION_API_KEY, base_url=settings.EVALUATION_BASE_URL)
+        self.client = openai.AsyncOpenAI(
+            **build_openai_client_kwargs(
+                api_key=settings.EVALUATION_API_KEY,
+                base_url=settings.EVALUATION_BASE_URL,
+            )
+        )
         self.langfuse = Langfuse(
             public_key=settings.LANGFUSE_PUBLIC_KEY,
             secret_key=settings.LANGFUSE_SECRET_KEY,
