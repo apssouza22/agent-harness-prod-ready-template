@@ -20,6 +20,7 @@ from src.app.core.middleware import (
     AgentPipeline,
     build_invoke_config,
     ErrorHandlingMiddleware,
+    LlmMetricsMiddleware,
     LoggingMiddleware,
     MemoryMiddleware,
 )
@@ -68,7 +69,7 @@ class DeepResearchAgent:
         self.checkpointer = checkpointer
         self._graph: Optional[CompiledStateGraph] = None
         self._pipeline = AgentPipeline(
-            middlewares=[LoggingMiddleware(), ErrorHandlingMiddleware(), MemoryMiddleware()],
+            middlewares=[LoggingMiddleware(), LlmMetricsMiddleware(), ErrorHandlingMiddleware(), MemoryMiddleware()],
             invoke_fn=self._core_invoke,
         )
 

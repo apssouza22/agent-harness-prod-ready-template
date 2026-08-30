@@ -13,6 +13,7 @@ from src.app.core.middleware import (
     build_invoke_config,
     ErrorHandlingMiddleware,
     GuardrailMiddleware,
+    LlmMetricsMiddleware,
     LoggingMiddleware,
 )
 from src.app.core.common.config import settings
@@ -29,6 +30,7 @@ class TextSQLDeepAgent:
         self._pipeline = AgentPipeline(
             middlewares=[
                 LoggingMiddleware(),
+                LlmMetricsMiddleware(),
                 ErrorHandlingMiddleware(),
                 GuardrailMiddleware(),
             ],

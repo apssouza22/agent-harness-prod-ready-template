@@ -41,7 +41,7 @@ from src.app.core.common.token_limit import is_token_limit_exceeded
 from src.app.core.common.utils import (
     get_notes_from_tool_calls,
 )
-from src.app.core.metrics import model_invoke_with_metrics
+from src.app.core.middleware import invoke_model
 from src.app.core.metrics.metrics import tool_executions_total
 
 
@@ -110,7 +110,7 @@ class SupervisorAgent:
         logger.info("node_start", node="_supervisor_node")
 
         supervisor_messages = state.get("supervisor_messages", [])
-        response = await model_invoke_with_metrics(self.supervisor_model, supervisor_messages, RESEARCH_MODEL, self.name)
+        response = await invoke_model(self.supervisor_model, supervisor_messages, RESEARCH_MODEL, config=config)
         return Command(
             goto="supervisor_tools",
             update={

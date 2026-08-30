@@ -51,7 +51,7 @@ from src.app.core.common.logging import logger
 from src.app.core.common.token_limit import is_token_limit_exceeded
 from src.app.core.common.utils import get_today_str, execute_tools
 from src.app.core.llm.llm_utils import record_llm_error
-from src.app.core.metrics import model_invoke_with_metrics
+from src.app.core.middleware import invoke_model
 
 synthesizer_model = create_chat_model(model=COMPRESSION_MODEL).with_config(compress_model_config)
 
@@ -104,7 +104,7 @@ class ResearcherAgent:
 
         researcher_prompt = research_system_prompt.format(date=get_today_str())
         messages = [SystemMessage(content=researcher_prompt)] + researcher_messages
-        response = await model_invoke_with_metrics(self.researcher_model, messages, RESEARCH_MODEL, self.name, config)
+        response = await invoke_model(self.researcher_model, messages, RESEARCH_MODEL, config=config)
         return Command(
             goto="researcher_tools",
             update={
@@ -185,7 +185,7 @@ class ResearcherAgent:
                 compression_prompt = compress_research_system_prompt.format(date=get_today_str())
                 messages = [SystemMessage(content=compression_prompt)] + researcher_messages
 
-                response = await model_invoke_with_metrics(synthesizer_model, messages, COMPRESSION_MODEL, self.name, config)
+                response = await invoke_model(synthesizer_model, messages, COMPRESSION_MODEL, config=config)
                 raw_notes_content = "\n".join([
                     str(message.content)
                     for message in filter_messages(researcher_messages, include_types=["tool", "ai"])

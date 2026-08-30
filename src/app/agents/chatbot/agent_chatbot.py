@@ -15,6 +15,7 @@ from src.app.core.middleware import (
     AgentPipeline,
     build_invoke_config,
     ErrorHandlingMiddleware,
+    LlmMetricsMiddleware,
     LoggingMiddleware,
     MemoryMiddleware,
     SummarizationMiddleware,
@@ -24,7 +25,6 @@ from src.app.core.guardrails import create_input_guardrail_node, create_output_g
 from src.app.core.common.config import settings
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
-from src.app.core.metrics import model_invoke_with_metrics
 from src.app.core.metrics.metrics import tool_executions_total
 from src.app.core.common.model.graph import GraphState
 from src.app.core.common.model.message import Message
@@ -64,6 +64,7 @@ class AgentChatbot:
         self._pipeline = AgentPipeline(
             middlewares=[
                 LoggingMiddleware(),
+                LlmMetricsMiddleware(),
                 ErrorHandlingMiddleware(),
                 MemoryMiddleware(),
                 SummarizationMiddleware(
@@ -113,11 +114,8 @@ class AgentChatbot:
         long_term_memory = ctx.metadata.get("long_term_memory", "")
         agent_input = {"messages": dump_messages(ctx.messages), "long_term_memory": long_term_memory}
 
-        response = await model_invoke_with_metrics(
-            self._graph,
+        response = await self._graph.ainvoke(
             agent_input,
-            settings.DEFAULT_LLM_MODEL,
-            self.name,
             ctx.config,
         )
         openai_style_messages = convert_to_openai_messages(response["messages"])
@@ -272,9 +270,7 @@ class AgentChatbot:
 
         model = chatbot_model.bind_tools(self._get_all_tools())
 
-        response_message = await model_invoke_with_metrics(
-            model, prepared, settings.DEFAULT_LLM_MODEL, self.name, config
-        )
+        response_message = await model.ainvoke(prepared, config)
 
         if ctx:
             response_message = await manager.run_after_model_call(

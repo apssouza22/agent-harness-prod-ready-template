@@ -39,7 +39,7 @@ from src.app.core.common.utils import (
     get_today_str,
 )
 from src.app.core.llm.llm_utils import record_llm_error
-from src.app.core.metrics import model_invoke_with_metrics
+from src.app.core.middleware import invoke_model
 
 clarification_model = (
     configurable_model
@@ -76,7 +76,7 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Comman
         date=get_today_str()
     )
     model_input = [HumanMessage(content=prompt_content)]
-    response = await model_invoke_with_metrics(clarification_model, model_input, RESEARCH_MODEL, DEEP_RESEARCH_AGENT_NAME, config)
+    response = await invoke_model(clarification_model, model_input, RESEARCH_MODEL, config=config)
 
     if response.need_clarification:
         return Command(
@@ -111,7 +111,7 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
         date=get_today_str()
     )
     model_input = [HumanMessage(content=prompt_content)]
-    response = await model_invoke_with_metrics(research_brief_model, model_input, RESEARCH_MODEL, DEEP_RESEARCH_AGENT_NAME, config)
+    response = await invoke_model(research_brief_model, model_input, RESEARCH_MODEL, config=config)
 
     supervisor_system_prompt = lead_researcher_prompt.format(
         date=get_today_str(),
@@ -167,7 +167,7 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
             model_input = [
                 HumanMessage(content=final_report_prompt)
             ]
-            final_report = await model_invoke_with_metrics(final_report_model, model_input, FINAL_REPORT_MODEL, DEEP_RESEARCH_AGENT_NAME, config)
+            final_report = await invoke_model(final_report_model, model_input, FINAL_REPORT_MODEL, config=config)
 
             return {
                 "final_report": final_report.content,

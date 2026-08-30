@@ -7,9 +7,23 @@ so that graph nodes can trigger ``before/after_model_call`` and
 ``before/after_tool_call`` hooks.
 """
 
+from contextvars import ContextVar
 from typing import Any, Optional, Sequence
 
+from langchain_core.language_models import LanguageModelInput
+from langchain_core.runnables import RunnableConfig
+
 from src.app.core.middleware.types import AgentContext, AgentMiddleware, InvokeResult, NextFn
+
+_active_middleware_manager: ContextVar[Optional["MiddlewareManager"]] = ContextVar(
+    "_active_middleware_manager",
+    default=None,
+)
+
+
+def get_active_middleware_manager() -> Optional["MiddlewareManager"]:
+    """Return the middleware manager for the current agent invocation."""
+    return _active_middleware_manager.get()
 
 
 class MiddlewareManager:
@@ -104,6 +118,41 @@ class MiddlewareManager:
         return tool_result
 
 
+async def invoke_model(
+    model,
+    model_input: LanguageModelInput,
+    model_name: str,
+    *,
+    config: RunnableConfig | None = None,
+    manager: Optional["MiddlewareManager"] = None,
+    ctx: Optional[AgentContext] = None,
+    run_before_hooks: bool = True,
+) -> Any:
+    """Invoke an LLM through the active middleware pipeline."""
+    active_manager = manager or get_active_middleware_manager()
+    active_ctx = ctx or (active_manager.active_ctx if active_manager else None)
+    hook_messages = model_input if isinstance(model_input, list) else []
+
+    if active_manager and active_ctx and run_before_hooks:
+        hook_messages = await active_manager.run_before_model_call(
+            active_ctx,
+            messages=hook_messages,
+            model_name=model_name,
+        )
+        if hook_messages is not model_input and isinstance(model_input, list):
+            model_input = hook_messages
+
+    response = await model.ainvoke(model_input, config)
+
+    if active_manager and active_ctx:
+        response = await active_manager.run_after_model_call(
+            active_ctx,
+            response=response,
+            model_name=model_name,
+        )
+    return response
+
+
 class AgentPipeline:
     """Composable middleware pipeline for agent invocations.
 
@@ -126,6 +175,7 @@ class AgentPipeline:
 
     async def run(self, ctx: AgentContext) -> InvokeResult:
         """Execute the full middleware lifecycle around the core invoke function."""
+        manager_token = _active_middleware_manager.set(self.manager)
         self.manager.set_active_ctx(ctx)
         try:
             short_circuit = await self.manager.run_before_invoke(ctx)
@@ -143,3 +193,4 @@ class AgentPipeline:
             return await self.manager.run_after_invoke(ctx, result)
         finally:
             self.manager.set_active_ctx(None)
+            _active_middleware_manager.reset(manager_token)
