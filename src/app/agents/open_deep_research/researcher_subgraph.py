@@ -15,9 +15,9 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from langgraph.constants import START, END
-from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Command
+
+from src.app.core.graph import END, GraphBuilder, START, StateGraphCompiled
 
 from src.app.agents.open_deep_research.config import (
     COMPRESSION_MODEL,
@@ -67,7 +67,7 @@ class ResearcherAgent:
     def __init__(self, name: str, tools: list[BaseTool]):
         self.name = name
         self.tools = tools
-        self._graph: Optional[CompiledStateGraph] = None
+        self._graph: Optional[StateGraphCompiled] = None
 
         self.researcher_model = (
             configurable_model
@@ -75,7 +75,7 @@ class ResearcherAgent:
             .with_config(research_model_config)
         )
 
-    async def compile(self) -> CompiledStateGraph:
+    async def compile(self) -> StateGraphCompiled:
         graph_builder = await self._create_graph()
         self._graph = graph_builder.compile(name=self.name)
         logger.info("graph_created", graph_name=self.name, environment=settings.ENVIRONMENT.value)
@@ -216,16 +216,16 @@ class ResearcherAgent:
             "raw_notes": [raw_notes_content]
         }
 
-    async def _create_graph(self) -> StateGraph:
+    async def _create_graph(self) -> GraphBuilder:
         """Build the researcher subgraph workflow.
 
         Returns:
-            StateGraph: The uncompiled researcher graph with all nodes and edges.
+            GraphBuilder: The uncompiled researcher graph with all nodes and edges.
         """
         try:
-            graph_builder = StateGraph(
+            graph_builder = GraphBuilder(
                 ResearcherState,
-                output=ResearcherOutputState,
+                output_schema=ResearcherOutputState,
             )
             graph_builder.set_node_defaults(
                 retry_policy=get_llm_retry_policy(),

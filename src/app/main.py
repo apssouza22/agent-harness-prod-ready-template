@@ -1,10 +1,6 @@
 """This file contains the main application entry point."""
 
 from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import (
-    Dict,
-)
 
 import uvicorn
 from dotenv import load_dotenv
@@ -15,22 +11,17 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import (
-    select,
-)
 from starlette.responses import JSONResponse
 
 from src.app.api.logging_context import LoggingContextMiddleware
 from src.app.api.metrics.http_metrics import setup_metrics
 from src.app.api.metrics.middleware import MetricsMiddleware
 from src.app.api.security.limiter import (
-    limiter,
     setup_rate_limit,
 )
 from src.app.api.v1.api import api_router
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
-from src.app.core.db.database import database_factory
 from src.app.init import langfuse_init, langfuse_shutdown, mcp_dependencies_init, mcp_dependencies_cleanup
 
 # Load environment variables
@@ -67,14 +58,10 @@ app = FastAPI(
 
 # Set up Prometheus metrics
 setup_metrics(app)
-
-# Set up rate limiter exception handler
 setup_rate_limit(app)
 
 # Add logging context middleware (must be added before other middleware to capture context)
 app.add_middleware(LoggingContextMiddleware)
-
-# Add custom metrics middleware
 app.add_middleware(MetricsMiddleware)
 
 

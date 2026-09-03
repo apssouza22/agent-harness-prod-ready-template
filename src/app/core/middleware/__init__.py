@@ -31,6 +31,7 @@ from src.app.core.middleware.pipeline import (
     MiddlewareManager,
     get_active_middleware_manager,
     invoke_model,
+    middleware_tool_wrappers,
 )
 from src.app.core.middleware.summarization_middleware import SummarizationMiddleware
 from src.app.core.middleware.trim_long_messages_middleware import TrimLongMessagesMiddleware

@@ -11,9 +11,9 @@ from asgiref.sync import sync_to_async
 from langchain_core.messages import convert_to_openai_messages
 from langchain_core.tools import tool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.constants import START, END
-from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import StateSnapshot
+
+from src.app.core.graph import END, GraphBuilder, START, StateGraphCompiled
 
 from src.app.core.middleware import (
     AgentContext,
@@ -67,7 +67,7 @@ class DeepResearchAgent:
     def __init__(self, name: str, checkpointer: AsyncPostgresSaver):
         self.name = name
         self.checkpointer = checkpointer
-        self._graph: Optional[CompiledStateGraph] = None
+        self._graph: Optional[StateGraphCompiled] = None
         self._pipeline = AgentPipeline(
             middlewares=[LoggingMiddleware(), LlmMetricsMiddleware(), ErrorHandlingMiddleware(), MemoryMiddleware()],
             invoke_fn=self._core_invoke,
@@ -77,7 +77,7 @@ class DeepResearchAgent:
         self.researcher_subagent = ResearcherAgent("Researcher", get_all_tools())
         self.supervisor_subagent = SupervisorAgent("Supervisor", lead_researcher_tools)
 
-    async def compile(self) -> CompiledStateGraph:
+    async def compile(self) -> StateGraphCompiled:
         """Compile all subgraphs and the main deep research graph."""
         try:
             await self.researcher_subagent.compile()
@@ -159,16 +159,16 @@ class DeepResearchAgent:
             logger.error("deep_research_stream_failed", error=str(stream_error), session_id=session_id)
             raise stream_error
 
-    def _build_deep_research_graph(self) -> StateGraph:
+    def _build_deep_research_graph(self) -> GraphBuilder:
         """Build the complete deep research workflow graph (uncompiled).
 
         Returns:
-            StateGraph: The uncompiled deep research graph builder.
+            GraphBuilder: The uncompiled deep research graph builder.
         """
         input_guardrail = create_input_guardrail_node(next_node="clarify_with_user")
         output_guardrail = create_output_guardrail_node()
 
-        deep_researcher_builder = StateGraph(AgentState, input=AgentInputState)
+        deep_researcher_builder = GraphBuilder(AgentState, input_schema=AgentInputState)
 
         llm_error_handler = create_deep_research_error_handler(
             agent_name=self.name,

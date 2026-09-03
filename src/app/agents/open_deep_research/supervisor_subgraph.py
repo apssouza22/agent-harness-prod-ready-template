@@ -14,9 +14,9 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from langgraph.constants import START, END
-from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Command
+
+from src.app.core.graph import END, GraphBuilder, START, StateGraphCompiled
 
 from src.app.agents.open_deep_research.config import (
     MAX_CONCURRENT_RESEARCH_UNITS,
@@ -60,7 +60,7 @@ class SupervisorAgent:
     def __init__(self, name: str, tools: list[BaseTool]):
         self.name = name
         self.tools = tools
-        self._graph: Optional[CompiledStateGraph] = None
+        self._graph: Optional[StateGraphCompiled] = None
         self._researcher_agent: Optional[ResearcherAgent] = None
 
         self.supervisor_model = (
@@ -69,13 +69,13 @@ class SupervisorAgent:
             .with_config(research_model_config)
         )
 
-    async def compile(self) -> CompiledStateGraph:
+    async def compile(self) -> StateGraphCompiled:
         graph_builder = await self._create_graph()
         self._graph = graph_builder.compile(name=self.name)
         logger.info("graph_created", graph_name=self.name, environment=settings.ENVIRONMENT.value)
         return self._graph
 
-    def get_graph(self) -> CompiledStateGraph:
+    def get_graph(self) -> StateGraphCompiled:
         """Get the compiled supervisor graph instance.
 
         Returns:
@@ -195,14 +195,14 @@ class SupervisorAgent:
             update=update_payload
         )
 
-    async def _create_graph(self) -> StateGraph:
+    async def _create_graph(self) -> GraphBuilder:
         """Build the supervisor subgraph workflow.
 
         Returns:
-            StateGraph: The uncompiled supervisor graph with all nodes and edges.
+            GraphBuilder: The uncompiled supervisor graph with all nodes and edges.
         """
         try:
-            graph_builder = StateGraph(SupervisorState)
+            graph_builder = GraphBuilder(SupervisorState)
             graph_builder.set_node_defaults(
                 retry_policy=get_llm_retry_policy(),
                 timeout=get_llm_timeout_policy(),

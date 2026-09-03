@@ -6,9 +6,9 @@ from asgiref.sync import sync_to_async
 from langchain_core.messages import SystemMessage, ToolMessage, convert_to_openai_messages
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.graph import END
-from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import RunnableConfig, Command, StateSnapshot
+
+from src.app.core.graph import END, GraphBuilder, StateGraphCompiled
 
 from src.app.core.middleware import (
     AgentContext,
@@ -60,7 +60,7 @@ class AgentChatbot:
         self.tools = tools
         self.tools_by_name = {tool.name: tool for tool in tools}
         self.mcp_tools_by_name: dict[str, BaseTool] = {}
-        self._graph: Optional[CompiledStateGraph] = None
+        self._graph: Optional[StateGraphCompiled] = None
         self._pipeline = AgentPipeline(
             middlewares=[
                 LoggingMiddleware(),
@@ -79,7 +79,7 @@ class AgentChatbot:
             invoke_fn=self._core_invoke,
         )
 
-    async def compile(self) -> CompiledStateGraph:
+    async def compile(self) -> StateGraphCompiled:
         """Compile the graph and prepare for execution."""
         await self._load_mcp_tools()
         graph_builder = await self._create_graph()
@@ -289,12 +289,12 @@ class AgentChatbot:
 
         return Command(update={"messages": [response_message]}, goto=goto)
 
-    async def _create_graph(self) -> StateGraph:
+    async def _create_graph(self) -> GraphBuilder:
         try:
             input_guardrail = create_input_guardrail_node(next_node="chat")
             output_guardrail = create_output_guardrail_node()
 
-            graph_builder = StateGraph(GraphState)
+            graph_builder = GraphBuilder(GraphState).set_middleware_manager(self._pipeline.manager)
             graph_builder.add_node("input_guardrail", input_guardrail, ends=["chat", END])
             graph_builder.add_node(
                 "chat",

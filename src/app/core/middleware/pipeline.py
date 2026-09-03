@@ -8,10 +8,12 @@ so that graph nodes can trigger ``before/after_model_call`` and
 """
 
 from contextvars import ContextVar
+from dataclasses import replace
 from typing import Any, Optional, Sequence
 
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.runnables import RunnableConfig
+from langgraph.prebuilt.tool_node import ToolCallRequest
 
 from src.app.core.middleware.types import AgentContext, AgentMiddleware, InvokeResult, NextFn
 
@@ -24,6 +26,55 @@ _active_middleware_manager: ContextVar[Optional["MiddlewareManager"]] = ContextV
 def get_active_middleware_manager() -> Optional["MiddlewareManager"]:
     """Return the middleware manager for the current agent invocation."""
     return _active_middleware_manager.get()
+
+
+def middleware_tool_wrappers(
+    manager: Optional["MiddlewareManager"] = None,
+) -> dict[str, Any]:
+    """Return LangGraph ToolNode wrappers that run middleware tool hooks."""
+    active_manager = manager or get_active_middleware_manager()
+    if active_manager is None:
+        return {}
+
+    def _tool_name(request: ToolCallRequest) -> str:
+        return request.tool_call["name"]
+
+    def _tool_args(request: ToolCallRequest) -> dict:
+        return dict(request.tool_call.get("args") or {})
+
+    def _with_tool_args(request: ToolCallRequest, tool_args: dict) -> ToolCallRequest:
+        tool_call = dict(request.tool_call)
+        tool_call["args"] = tool_args
+        return replace(request, tool_call=tool_call)
+
+    def wrap_tool_call(request: ToolCallRequest, handler):
+        return handler(request)
+
+    async def awrap_tool_call(request: ToolCallRequest, handler):
+        manager = active_manager
+        ctx = manager.active_ctx
+        if manager and ctx:
+            tool_args = await manager.run_before_tool_call(
+                ctx,
+                tool_name=_tool_name(request),
+                tool_args=_tool_args(request),
+            )
+            request = _with_tool_args(request, tool_args)
+
+        result = await handler(request)
+
+        if manager and ctx:
+            return await manager.run_after_tool_call(
+                ctx,
+                tool_name=_tool_name(request),
+                tool_result=result,
+            )
+        return result
+
+    return {
+        "wrap_tool_call": wrap_tool_call,
+        "awrap_tool_call": awrap_tool_call,
+    }
 
 
 class MiddlewareManager:
