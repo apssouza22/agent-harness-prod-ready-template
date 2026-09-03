@@ -47,7 +47,7 @@ from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
 from src.app.core.common.model.message import Message
 from src.app.core.llm.llm_utils import dump_messages, record_llm_error
-from src.app.core.memory.memory import bg_update_memory
+from src.app.core.memory import memory_service
 
 
 class DeepResearchAgent:
@@ -152,7 +152,9 @@ class DeepResearchAgent:
 
             state: StateSnapshot = await sync_to_async(self._graph.get_state)(config=config)
             if state.values and "messages" in state.values:
-                bg_update_memory(user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"])
+                memory_service.schedule_add(
+                    user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"]
+                )
 
         except Exception as stream_error:
             record_llm_error("deep_research", self.name)

@@ -1,10 +1,11 @@
 """Long-term memory management using mem0 and pgvector.
 
-This module provides functions for managing long-term memory operations including
-initialization, search, and updates using the mem0 library with PostgreSQL/pgvector backend.
+This module provides a MemoryService class for managing long-term memory operations
+including initialization, search, and updates using the mem0 library with PostgreSQL/pgvector backend.
 """
+
 import asyncio
-from typing import Optional
+from typing import Any, Optional
 
 from mem0 import AsyncMemory
 
@@ -12,101 +13,107 @@ from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.llm.factory import build_mem0_openai_config
 
-# Module-level singleton for memory instance
-_memory_instance: Optional[AsyncMemory] = None
 
+class MemoryService:
+    """Service for long-term memory operations using mem0 and pgvector.
 
-async def get_memory_instance() -> AsyncMemory:
-    """Initialize and return the long-term memory singleton.
-
-    Returns:
-        AsyncMemory: The initialized memory instance.
+    Encapsulates the AsyncMemory singleton and exposes typed methods for
+    searching and updating user memories.
     """
-    global _memory_instance
-    if _memory_instance is None:
+
+    def __init__(self) -> None:
+        self._memory: Optional[AsyncMemory] = None
+
+    async def _get_memory(self) -> AsyncMemory:
+        """Lazily initialize and return the mem0 AsyncMemory instance."""
+        if self._memory is None:
+            self._memory = await AsyncMemory.from_config(config_dict=self._build_config())
+            logger.info(
+                "long_term_memory_initialized",
+                collection_name=settings.LONG_TERM_MEMORY_COLLECTION_NAME,
+            )
+        return self._memory
+
+    def _build_config(self) -> dict[str, Any]:
+        """Build the mem0 configuration dictionary."""
         mem0_openai_config = build_mem0_openai_config()
-        _memory_instance = await AsyncMemory.from_config(
-            config_dict={
-                "vector_store": {
-                    "provider": "pgvector",
-                    "config": {
-                        "collection_name": settings.LONG_TERM_MEMORY_COLLECTION_NAME,
-                        "dbname": settings.POSTGRES_DB,
-                        "user": settings.POSTGRES_USER,
-                        "password": settings.POSTGRES_PASSWORD,
-                        "host": settings.POSTGRES_HOST,
-                        "port": settings.POSTGRES_PORT,
-                    },
+        config: dict[str, Any] = {
+            "vector_store": {
+                "provider": "pgvector",
+                "config": {
+                    "collection_name": settings.LONG_TERM_MEMORY_COLLECTION_NAME,
+                    "dbname": settings.POSTGRES_DB,
+                    "user": settings.POSTGRES_USER,
+                    "password": settings.POSTGRES_PASSWORD,
+                    "host": settings.POSTGRES_HOST,
+                    "port": settings.POSTGRES_PORT,
                 },
-                "llm": {
-                    "provider": "openai",
-                    "config": {
-                        "model": settings.LONG_TERM_MEMORY_MODEL,
-                        **mem0_openai_config,
-                    },
+            },
+            "llm": {
+                "provider": "openai",
+                "config": {
+                    "model": settings.LONG_TERM_MEMORY_MODEL,
+                    **mem0_openai_config,
                 },
-                "embedder": {
-                    "provider": "openai",
-                    "config": {
-                        "model": settings.LONG_TERM_MEMORY_EMBEDDER_MODEL,
-                        **mem0_openai_config,
-                    },
+            },
+            "embedder": {
+                "provider": "openai",
+                "config": {
+                    "model": settings.LONG_TERM_MEMORY_EMBEDDER_MODEL,
+                    **mem0_openai_config,
                 },
-                # "custom_fact_extraction_prompt": load_custom_fact_extraction_prompt(),
-            }
-        )
-    return _memory_instance
+            },
+        }
+
+        if settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS:
+            config["custom_instructions"] = settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS
+
+        return config
+
+    async def search(self, user_id: int, query: str) -> str:
+        """Get relevant memories for a user and query.
+
+        Args:
+            user_id: The user ID to search memories for.
+            query: The query to search for relevant memories.
+
+        Returns:
+            Formatted string of relevant memories, or empty string on error.
+        """
+        try:
+            memory = await self._get_memory()
+            results = await memory.search(user_id=str(user_id), query=query)
+            memory_result = "\n".join(f"* {result['memory']}" for result in results["results"])
+            logger.debug("relevant_memory_retrieved", user_id=user_id, result_count=len(results["results"]))
+            return memory_result
+        except Exception as e:
+            logger.exception("failed_to_get_relevant_memory", user_id=user_id, query=query, error=str(e))
+            return ""
+
+    async def add(self, user_id: int, messages: list[dict], metadata: Optional[dict] = None) -> None:
+        """Update long-term memory with new messages.
+
+        Args:
+            user_id: The user ID to update memory for.
+            messages: The messages to add to memory.
+            metadata: Optional metadata to include with the memory update.
+        """
+        try:
+            memory = await self._get_memory()
+            await memory.add(messages, user_id=str(user_id), metadata=metadata)
+            logger.info("long_term_memory_updated_successfully", user_id=user_id)
+        except Exception as e:
+            logger.exception("failed_to_update_long_term_memory", user_id=user_id, error=str(e))
+
+    def schedule_add(self, user_id: int, messages: list[dict], metadata: Optional[dict] = None) -> None:
+        """Schedule a memory update in the background without blocking the response.
+
+        Args:
+            user_id: The user ID to update memory for.
+            messages: The messages to add to memory.
+            metadata: Optional metadata to include with the memory update.
+        """
+        asyncio.create_task(self.add(user_id, messages, metadata))
 
 
-async def get_relevant_memory(user_id: int, query: str) -> str:
-    """Get relevant memories for user and query.
-
-    Args:
-        user_id: The user ID to search memories for.
-        query: The query to search for relevant memories.
-
-    Returns:
-        str: Formatted string of relevant memories, or empty string on error.
-    """
-    try:
-        memory = await get_memory_instance()
-        results = await memory.search(user_id=str(user_id), query=query)
-        memory_result = "\n".join([f"* {result['memory']}" for result in results["results"]])
-        logger.debug("Retrieved relevant memory:", memory_result)
-        return memory_result
-    except Exception as e:
-        logger.error("failed_to_get_relevant_memory", error=str(e), user_id=user_id, query=query)
-        return ""
-
-
-async def update_memory(user_id: int, messages: list[dict], metadata: dict = None) -> None:
-    """Update long-term memory with new messages.
-
-    Args:
-        user_id: The user ID to update memory for.
-        messages: The messages to add to memory.
-        metadata: Optional metadata to include with the memory update.
-    """
-    try:
-        memory = await get_memory_instance()
-        await memory.add(messages, user_id=str(user_id), metadata=metadata)
-        logger.info("long_term_memory_updated_successfully", user_id=user_id)
-    except Exception as e:
-        logger.exception(
-            "failed_to_update_long_term_memory",
-            user_id=user_id,
-            error=str(e),
-        )
-
-def bg_update_memory(user_id: int, messages: list[dict], metadata: dict = None) -> None:
-    """Run memory update in background without blocking the response
-
-    Args:
-        user_id: The user ID to update memory for.
-        messages: The messages to add to memory.
-        metadata: Optional metadata to include with the memory update.
-    """
-    asyncio.create_task(
-        update_memory(user_id, messages, metadata)
-    )
-
+memory_service = MemoryService()

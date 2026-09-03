@@ -40,7 +40,7 @@ from src.app.core.fault_tolerance import (
 from src.app.core.context import truncate_tool_call_if_too_long
 from src.app.core.mcp.mcp_utils import handle_mcp_tool_call
 from src.app.core.mcp.session_manager import get_mcp_session_manager
-from src.app.core.memory.memory import bg_update_memory, get_relevant_memory
+from src.app.core.memory import memory_service
 
 from src.app.core.llm.factory import create_chat_model
 
@@ -140,7 +140,7 @@ class AgentChatbot:
         """
         config = build_invoke_config(session_id, user_id, self.name)
         relevant_memory = (
-            await get_relevant_memory(user_id, messages[-1].content)
+            await memory_service.search(user_id, messages[-1].content)
         ) or "No relevant memory found."
 
         try:
@@ -157,7 +157,9 @@ class AgentChatbot:
 
             state: StateSnapshot = await sync_to_async(self._graph.get_state)(config=config)
             if state.values and "messages" in state.values:
-                bg_update_memory(user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"])
+                memory_service.schedule_add(
+                    user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"]
+                )
 
         except Exception as stream_error:
             record_llm_error(settings.DEFAULT_LLM_MODEL, self.name)
