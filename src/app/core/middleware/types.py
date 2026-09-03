@@ -138,14 +138,17 @@ def build_invoke_config(
     agent_name: str = "",
 ) -> dict:
     """Build a LangGraph invoke config shared across all agents."""
+    metadata: dict[str, str] = {
+        "langfuse_session_id": session_id,
+        "environment": settings.ENVIRONMENT.value,
+        "debug": str(settings.DEBUG).lower(),
+    }
+    if user_id is not None:
+        metadata["langfuse_user_id"] = str(user_id)
+
     return {
         "callbacks": [langfuse_callback_handler],
         "run_name": agent_name,
         "configurable": {"thread_id": session_id},
-        "metadata": {
-            "environment": settings.ENVIRONMENT.value,
-            "debug": settings.DEBUG,
-            "user_id": user_id,
-            "session_id": session_id,
-        },
+        "metadata": metadata,
     }

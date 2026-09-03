@@ -31,7 +31,7 @@ from src.app.api.v1.api import api_router
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.db.database import database_factory
-from src.app.init import langfuse_init, mcp_dependencies_init, mcp_dependencies_cleanup
+from src.app.init import langfuse_init, langfuse_shutdown, mcp_dependencies_init, mcp_dependencies_cleanup
 
 # Load environment variables
 load_dotenv()
@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
     yield
 
     await mcp_dependencies_cleanup()
+    langfuse_shutdown()
 
     logger.info("application_shutdown")
 

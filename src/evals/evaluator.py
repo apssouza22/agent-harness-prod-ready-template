@@ -9,7 +9,7 @@ from time import sleep
 
 import openai
 from langfuse import Langfuse
-from langfuse.api.resources.commons.types.trace_with_details import TraceWithDetails
+from langfuse.api.commons.types.observation_v2 import ObservationV2
 from tqdm import tqdm
 
 from src.app.core.common.config import settings
@@ -32,8 +32,8 @@ from src.evals.schemas import ScoreSchema
 class Evaluator:
     """Evaluates model outputs using predefined metrics.
 
-    This class handles fetching traces from Langfuse, evaluating them against
-    metrics, and uploading scores back to Langfuse.
+    This class handles fetching root observations from Langfuse, evaluating them
+    against metrics, and uploading scores back to Langfuse.
 
     Attributes:
         client: OpenAI client for API calls.
@@ -51,29 +51,32 @@ class Evaluator:
         self.langfuse = Langfuse(
             public_key=settings.LANGFUSE_PUBLIC_KEY,
             secret_key=settings.LANGFUSE_SECRET_KEY,
-            timeout=60,  # In seconds
+            host=settings.LANGFUSE_HOST,
+            timeout=60,
         )
-        # Initialize report data structure
         self.report = initialize_report(settings.EVALUATION_LLM)
         initialize_metrics_summary(self.report, metrics)
 
     async def run(self, generate_report_file=True):
         """Main execution function that fetches and evaluates traces.
 
-        Retrieves traces from Langfuse, evaluates each one against all metrics,
-        and uploads the scores back to Langfuse.
+        Retrieves root observations from Langfuse, evaluates each one against all
+        metrics, and uploads the scores back to Langfuse.
 
         Args:
             generate_report_file: Whether to generate a JSON report after evaluation. Defaults to True.
         """
         start_time = time.time()
-        traces = self.__fetch_traces()
-        self.report["total_traces"] = len(traces)
+        observations = self.__fetch_root_observations()
+        self.report["total_traces"] = len(observations)
 
         trace_results = {}
 
-        for trace in tqdm(traces, desc="Evaluating traces"):
-            trace_id = trace.id
+        for observation in tqdm(observations, desc="Evaluating traces"):
+            trace_id = observation.trace_id
+            if not trace_id:
+                continue
+
             trace_results[trace_id] = {
                 "success": False,
                 "metrics_evaluated": 0,
@@ -83,11 +86,11 @@ class Evaluator:
 
             for metric in tqdm(metrics, desc=f"Applying metrics to trace {trace_id[:8]}...", leave=False):
                 metric_name = metric["name"]
-                input, output = get_input_output(trace)
-                score = await self._run_metric_evaluation(metric, input, output)
+                input_text, output_text = get_input_output(observation)
+                score = await self._run_metric_evaluation(metric, input_text, output_text)
 
                 if score:
-                    self._push_to_langfuse(trace, score, metric)
+                    self._push_to_langfuse(trace_id, score, metric)
                     update_success_metrics(self.report, trace_id, metric_name, score, trace_results)
                 else:
                     update_failure_metrics(self.report, trace_id, metric_name, trace_results)
@@ -111,16 +114,16 @@ class Evaluator:
             duration_seconds=self.report["duration_seconds"],
         )
 
-    def _push_to_langfuse(self, trace: TraceWithDetails, score: ScoreSchema, metric: dict):
+    def _push_to_langfuse(self, trace_id: str, score: ScoreSchema, metric: dict):
         """Push evaluation score to Langfuse.
 
         Args:
-            trace: The trace to score.
+            trace_id: The trace to score.
             score: The evaluation score.
             metric: The metric used for evaluation.
         """
         self.langfuse.create_score(
-            trace_id=trace.id,
+            trace_id=trace_id,
             name=metric["name"],
             data_type="NUMERIC",
             value=score.score,
@@ -184,20 +187,62 @@ class Evaluator:
                 continue
         return None
 
-    def __fetch_traces(self) -> list[TraceWithDetails]:
-        """Fetch traces from the past 24 hours without scores.
+    def __fetch_root_observations(self) -> list[ObservationV2]:
+        """Fetch root observations from the past 24 hours without scores.
 
         Returns:
-            List of traces that haven't been scored yet.
+            List of root observations whose traces have not been scored yet.
         """
-        last_24_hours = datetime.now() - timedelta(hours=24)
-        logger.info("fetching_langfuse_traces", from_timestamp=str(last_24_hours))
+        from_timestamp = datetime.now() - timedelta(hours=24)
+        to_timestamp = datetime.now()
+        logger.info("fetching_langfuse_observations", from_timestamp=str(from_timestamp))
         try:
-            traces = self.langfuse.api.trace.list(
-                from_timestamp=last_24_hours, order_by="timestamp.asc", limit=100
-            ).data
-            traces_without_scores = [trace for trace in traces if not trace.scores]
-            return traces_without_scores
+            scored_trace_ids = self._get_scored_trace_ids(from_timestamp, to_timestamp)
+            observations: list[ObservationV2] = []
+            cursor = None
+
+            while True:
+                response = self.langfuse.api.observations.get_many(
+                    from_start_time=from_timestamp,
+                    to_start_time=to_timestamp,
+                    is_root_observation=True,
+                    fields="core,basic,io",
+                    limit=100,
+                    cursor=cursor,
+                )
+                observations.extend(response.data)
+                cursor = response.meta.cursor if response.meta else None
+                if not cursor:
+                    break
+
+            return [
+                observation
+                for observation in observations
+                if observation.trace_id and observation.trace_id not in scored_trace_ids
+            ]
         except Exception as e:
-            logger.error("Error fetching traces", error=str(e))
+            logger.error("error_fetching_observations", error=str(e))
             return []
+
+    def _get_scored_trace_ids(self, from_timestamp: datetime, to_timestamp: datetime) -> set[str]:
+        scored_trace_ids: set[str] = set()
+        cursor = None
+
+        while True:
+            response = self.langfuse.api.scores_v3.get_many_v3(
+                from_timestamp=from_timestamp,
+                to_timestamp=to_timestamp,
+                fields="core",
+                limit=100,
+                cursor=cursor,
+            )
+            for score in response.data:
+                subject = score.subject
+                if getattr(subject, "kind", None) == "trace":
+                    scored_trace_ids.add(subject.id)
+
+            cursor = response.meta.cursor if response.meta else None
+            if not cursor:
+                break
+
+        return scored_trace_ids

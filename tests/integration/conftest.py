@@ -51,6 +51,7 @@ _sqlmodel_module.create_engine = _sqlite_create_engine
 _mock_langfuse_inst = MagicMock()
 _mock_langfuse_inst.auth_check.return_value = True
 patch("langfuse.Langfuse", return_value=_mock_langfuse_inst).start()
+patch("langfuse.get_client", return_value=_mock_langfuse_inst).start()
 patch("langfuse.langchain.CallbackHandler", return_value=MagicMock()).start()
 
 # ---------------------------------------------------------------------------

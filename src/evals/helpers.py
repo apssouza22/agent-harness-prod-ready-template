@@ -11,7 +11,7 @@ from typing import (
     Tuple,
 )
 
-from langfuse.api.resources.commons.types.trace_with_details import TraceWithDetails
+from langfuse.api.commons.types.observation_v2 import ObservationV2
 
 from src.app.core.common.logging import logger
 from src.evals.schemas import ScoreSchema
@@ -30,11 +30,15 @@ def format_messages(messages: list[dict]) -> str:
     for idx, message in enumerate(messages):
         if message["type"] == "tool":
             previous_message = messages[idx - 1]
-            tool_call = previous_message.get('additional_kwargs', {}).get('tool_calls', [])
+            tool_call = previous_message.get("additional_kwargs", {}).get("tool_calls", [])
             if tool_call:
-                args = tool_call[0].get('function', {}).get('arguments')
+                args = tool_call[0].get("function", {}).get("arguments")
             else:
-                args = previous_message.get('tool_calls')[0].get('args') if previous_message.get('tool_calls') else {}
+                args = (
+                    previous_message.get("tool_calls")[0].get("args")
+                    if previous_message.get("tool_calls")
+                    else {}
+                )
             formatted_messages.append(
                 f"tool {message.get('name')} input: {args} {message.get('content')[:100]}..."
                 if len(message.get("content", "")) > 100
@@ -45,19 +49,32 @@ def format_messages(messages: list[dict]) -> str:
     return "\n".join(formatted_messages)
 
 
-def get_input_output(trace: TraceWithDetails) -> Tuple[Optional[str], Optional[str]]:
-    """Extract and format input and output messages from a trace.
+def _parse_observation_io(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def get_input_output(observation: ObservationV2) -> Tuple[Optional[str], Optional[str]]:
+    """Extract and format input and output messages from a root observation.
 
     Args:
-        trace: The trace to extract messages from.
+        observation: The root observation to extract messages from.
 
     Returns:
         Tuple of (formatted_input, formatted_output). None if output is not a dict.
     """
-    if not isinstance(trace.output, dict):
+    output = _parse_observation_io(observation.output)
+    if not isinstance(output, dict):
         return None, None
-    input_messages = trace.output.get("messages", [])[:-1]
-    output_message = trace.output.get("messages", [])[-1]
+    messages = output.get("messages", [])
+    if not messages:
+        return None, None
+    input_messages = messages[:-1]
+    output_message = messages[-1]
     return format_messages(input_messages), format_messages([output_message])
 
 
