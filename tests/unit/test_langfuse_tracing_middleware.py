@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.app.core.common.model.message import Message
-from src.app.core.middleware.langfuse_tracing_middleware import LangfuseTracingMiddleware
+from src.app.core.langfuse import LangfuseTracingMiddleware
 from src.app.core.middleware.pipeline import AgentPipeline
 from src.app.core.middleware.types import AgentContext, build_invoke_config
 

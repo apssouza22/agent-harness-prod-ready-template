@@ -22,7 +22,6 @@ Usage::
 """
 
 from src.app.core.middleware.error_handling_middleware import ErrorHandlingMiddleware
-from src.app.core.middleware.langfuse_tracing_middleware import LangfuseTracingMiddleware
 from src.app.core.middleware.guardrail_middleware import GuardrailMiddleware
 from src.app.core.middleware.llm_metrics_middleware import LlmMetricsMiddleware
 from src.app.core.middleware.logging_middleware import LoggingMiddleware
@@ -45,7 +44,6 @@ __all__ = [
     "ErrorHandlingMiddleware",
     "GuardrailMiddleware",
     "InvokeResult",
-    "LangfuseTracingMiddleware",
     "LlmMetricsMiddleware",
     "LoggingMiddleware",
     "MemoryMiddleware",

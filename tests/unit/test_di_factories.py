@@ -14,11 +14,6 @@ from src.app.core.llm import factory as llm_factory
 from src.app.core.memory.factory import make_memory_service, make_memory_service_fresh
 from src.app.core.session.factory import make_session_repository
 from src.app.core.langfuse.factory import make_langfuse_tracer
-from src.app.core.tracing.factory import (
-    init_langfuse,
-    make_langfuse_callback_handler,
-    shutdown_langfuse,
-)
 from src.app.core.user.factory import make_user_repository
 
 
@@ -94,24 +89,30 @@ def test_make_langfuse_tracer_returns_tracer(test_settings, monkeypatch):
     mock_client.auth_check.assert_called_once()
 
 
-def test_make_langfuse_callback_handler_returns_handler():
-    handler = make_langfuse_callback_handler()
-
-    assert handler is not None
-
-
-def test_init_and_shutdown_langfuse(test_settings, monkeypatch):
+def test_make_langfuse_tracer_shutdown(test_settings, monkeypatch):
     make_langfuse_tracer.cache_clear()
     monkeypatch.setattr("src.app.core.langfuse.factory.get_settings", lambda: test_settings)
     mock_client = MagicMock()
     mock_client.auth_check.return_value = True
 
     with patch("src.app.core.langfuse.client.Langfuse", return_value=mock_client):
-        init_langfuse(test_settings)
-        shutdown_langfuse()
+        tracer = make_langfuse_tracer()
+        tracer.shutdown()
 
-    mock_client.auth_check.assert_called_once()
     mock_client.shutdown.assert_called_once()
+
+
+def test_langfuse_tracer_get_callback_handler_when_enabled(test_settings, monkeypatch):
+    make_langfuse_tracer.cache_clear()
+    monkeypatch.setattr("src.app.core.langfuse.factory.get_settings", lambda: test_settings)
+    mock_client = MagicMock()
+    mock_client.auth_check.return_value = True
+
+    with patch("src.app.core.langfuse.client.Langfuse", return_value=mock_client):
+        tracer = make_langfuse_tracer()
+        handler = tracer.get_callback_handler()
+
+    assert handler is not None
 
 
 @pytest.mark.asyncio

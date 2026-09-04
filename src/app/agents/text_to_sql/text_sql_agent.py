@@ -8,14 +8,13 @@ from langchain.agents.middleware import PIIMiddleware
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
 from src.app.core.llm.factory import create_openai_chat_model
-from src.app.core.langfuse.client import LangfuseTracer
+from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
 from src.app.core.middleware import (
     AgentContext,
     AgentPipeline,
     build_invoke_config,
     ErrorHandlingMiddleware,
     GuardrailMiddleware,
-    LangfuseTracingMiddleware,
     LlmMetricsMiddleware,
     LoggingMiddleware,
 )

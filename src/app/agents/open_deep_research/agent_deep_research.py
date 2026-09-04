@@ -15,14 +15,13 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import StateSnapshot
 
 from src.app.core.graph import END, GraphBuilder, START, StateGraphCompiled
-from src.app.core.langfuse.client import LangfuseTracer
+from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
 
 from src.app.core.middleware import (
     AgentContext,
     AgentPipeline,
     build_invoke_config,
     ErrorHandlingMiddleware,
-    LangfuseTracingMiddleware,
     LlmMetricsMiddleware,
     LoggingMiddleware,
     MemoryMiddleware,
