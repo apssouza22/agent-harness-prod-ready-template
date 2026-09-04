@@ -1,6 +1,6 @@
 """LangGraph node error handlers for graceful recovery after retry exhaustion."""
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -35,10 +35,10 @@ def create_chat_node_error_handler(
     agent_name: str,
     model_name: str,
     fallback_goto: str,
-) -> Callable[[Any, NodeError], Command]:
+) -> Callable[[Any, NodeError], Awaitable[Command]]:
     """Return an error handler that routes to a fallback node with an apology message."""
 
-    def chat_node_error_handler(state: Any, error: NodeError) -> Command:
+    async def chat_node_error_handler(state: Any, error: NodeError) -> Command:
         _record_node_failure(agent_name, error)
         record_llm_error(model_name, agent_name)
         return Command(
@@ -57,10 +57,10 @@ def create_tool_node_error_handler(
     *,
     agent_name: str,
     fallback_goto: str,
-) -> Callable[[Any, NodeError], Command]:
+) -> Callable[[Any, NodeError], Awaitable[Command]]:
     """Return an error handler that injects tool error messages and continues the graph."""
 
-    def tool_node_error_handler(state: Any, error: NodeError) -> Command:
+    async def tool_node_error_handler(state: Any, error: NodeError) -> Command:
         _record_node_failure(agent_name, error)
         tool_messages: list[ToolMessage] = []
         messages = state.messages if hasattr(state, "messages") else state.get("messages", [])
@@ -93,10 +93,10 @@ def create_deep_research_error_handler(
     agent_name: str,
     model_name: str,
     fallback_goto: str,
-) -> Callable[[Any, NodeError], Command]:
+) -> Callable[[Any, NodeError], Awaitable[Command]]:
     """Return an error handler for deep-research LLM nodes."""
 
-    def deep_research_error_handler(state: Any, error: NodeError) -> Command:
+    async def deep_research_error_handler(state: Any, error: NodeError) -> Command:
         _record_node_failure(agent_name, error)
         record_llm_error(model_name, agent_name)
         return Command(

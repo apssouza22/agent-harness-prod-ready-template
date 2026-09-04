@@ -1,5 +1,6 @@
 """Unit tests for LangGraph fault tolerance helpers."""
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.errors import NodeError
 from langgraph.types import RetryPolicy, TimeoutPolicy
@@ -37,28 +38,30 @@ def test_llm_timeout_policy_uses_settings():
     assert policy.idle_timeout == settings.GRAPH_LLM_IDLE_TIMEOUT
 
 
-def test_chat_error_handler_routes_to_fallback():
+@pytest.mark.asyncio
+async def test_chat_error_handler_routes_to_fallback():
     handler = create_chat_node_error_handler(
         agent_name="test-agent",
         model_name="gpt-test",
         fallback_goto="output_guardrail",
     )
     state = GraphState(messages=[HumanMessage(content="hello")])
-    command = handler(state, NodeError(node="chat", error=RuntimeError("provider down")))
+    command = await handler(state, NodeError(node="chat", error=RuntimeError("provider down")))
 
     assert command.goto == "output_guardrail"
     assert command.update["failed_node"] == "chat"
     assert command.update["messages"][0].content == LLM_UNAVAILABLE_MESSAGE
 
 
-def test_tool_error_handler_returns_tool_messages():
+@pytest.mark.asyncio
+async def test_tool_error_handler_returns_tool_messages():
     handler = create_tool_node_error_handler(agent_name="test-agent", fallback_goto="chat")
     ai_message = AIMessage(
         content="",
         tool_calls=[{"name": "search", "args": {"q": "test"}, "id": "call_1", "type": "tool_call"}],
     )
     state = GraphState(messages=[HumanMessage(content="hello"), ai_message])
-    command = handler(state, NodeError(node="tool_call", error=ConnectionError("reset")))
+    command = await handler(state, NodeError(node="tool_call", error=ConnectionError("reset")))
 
     assert command.goto == "chat"
     assert len(command.update["messages"]) == 1

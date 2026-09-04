@@ -10,6 +10,7 @@ from sqlmodel import (
 
 from src.app.core.common.config import (
     Environment,
+    Settings,
     settings,
 )
 from src.app.core.common.logging import logger
@@ -22,17 +23,17 @@ class DatabaseFactory:
     It uses SQLModel for ORM operations and maintains a connection pool.
     """
 
-    def __init__(self):
+    def __init__(self, app_settings: Settings | None = None):
         """Initialize database service with connection pool."""
-        try:
-            # Configure environment-specific database connection pool settings
-            pool_size = settings.POSTGRES_POOL_SIZE
-            max_overflow = settings.POSTGRES_MAX_OVERFLOW
+        self.settings = app_settings or settings
 
-            # Create engine with appropriate pool configuration
+        try:
+            pool_size = self.settings.POSTGRES_POOL_SIZE
+            max_overflow = self.settings.POSTGRES_MAX_OVERFLOW
+
             connection_url = (
-                f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}"
-                f"@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
+                f"postgresql://{self.settings.POSTGRES_USER}:{self.settings.POSTGRES_PASSWORD}"
+                f"@{self.settings.POSTGRES_HOST}:{self.settings.POSTGRES_PORT}/{self.settings.POSTGRES_DB}"
             )
 
             self.engine = create_engine(
@@ -41,23 +42,25 @@ class DatabaseFactory:
                 poolclass=QueuePool,
                 pool_size=pool_size,
                 max_overflow=max_overflow,
-                pool_timeout=30,  # Connection timeout (seconds)
-                pool_recycle=1800,  # Recycle connections after 30 minutes
+                pool_timeout=30,
+                pool_recycle=1800,
             )
 
-            # Create tables (only if they don't exist)
             SQLModel.metadata.create_all(self.engine)
 
             logger.info(
                 "database_initialized",
-                environment=settings.ENVIRONMENT.value,
+                environment=self.settings.ENVIRONMENT.value,
                 pool_size=pool_size,
                 max_overflow=max_overflow,
             )
         except SQLAlchemyError as e:
-            logger.error("database_initialization_error", error=str(e), environment=settings.ENVIRONMENT.value)
-            # In production, don't raise - allow app to start even with DB issues
-            if settings.ENVIRONMENT != Environment.PRODUCTION:
+            logger.error(
+                "database_initialization_error",
+                error=str(e),
+                environment=self.settings.ENVIRONMENT.value,
+            )
+            if self.settings.ENVIRONMENT != Environment.PRODUCTION:
                 raise
 
     def get_session_maker(self) -> Session:
@@ -67,9 +70,3 @@ class DatabaseFactory:
             Session: A SQLModel session maker
         """
         return Session(self.engine)
-
-
-
-
-# Create a singleton instance
-database_factory = DatabaseFactory()

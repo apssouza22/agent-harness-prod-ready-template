@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 from mem0 import AsyncMemory
 
-from src.app.core.common.config import settings
+from src.app.core.common.config import Settings, settings
 from src.app.core.common.logging import logger
 from src.app.core.llm.factory import build_mem0_openai_config
 
@@ -21,7 +21,8 @@ class MemoryService:
     searching and updating user memories.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, app_settings: Settings | None = None) -> None:
+        self._settings = app_settings or settings
         self._memory: Optional[AsyncMemory] = None
 
     async def _get_memory(self) -> AsyncMemory:
@@ -30,43 +31,43 @@ class MemoryService:
             self._memory = await AsyncMemory.from_config(config_dict=self._build_config())
             logger.info(
                 "long_term_memory_initialized",
-                collection_name=settings.LONG_TERM_MEMORY_COLLECTION_NAME,
+                collection_name=self._settings.LONG_TERM_MEMORY_COLLECTION_NAME,
             )
         return self._memory
 
     def _build_config(self) -> dict[str, Any]:
         """Build the mem0 configuration dictionary."""
-        mem0_openai_config = build_mem0_openai_config()
+        mem0_openai_config = build_mem0_openai_config(app_settings=self._settings)
         config: dict[str, Any] = {
             "vector_store": {
                 "provider": "pgvector",
                 "config": {
-                    "collection_name": settings.LONG_TERM_MEMORY_COLLECTION_NAME,
-                    "dbname": settings.POSTGRES_DB,
-                    "user": settings.POSTGRES_USER,
-                    "password": settings.POSTGRES_PASSWORD,
-                    "host": settings.POSTGRES_HOST,
-                    "port": settings.POSTGRES_PORT,
+                    "collection_name": self._settings.LONG_TERM_MEMORY_COLLECTION_NAME,
+                    "dbname": self._settings.POSTGRES_DB,
+                    "user": self._settings.POSTGRES_USER,
+                    "password": self._settings.POSTGRES_PASSWORD,
+                    "host": self._settings.POSTGRES_HOST,
+                    "port": self._settings.POSTGRES_PORT,
                 },
             },
             "llm": {
                 "provider": "openai",
                 "config": {
-                    "model": settings.LONG_TERM_MEMORY_MODEL,
+                    "model": self._settings.LONG_TERM_MEMORY_MODEL,
                     **mem0_openai_config,
                 },
             },
             "embedder": {
                 "provider": "openai",
                 "config": {
-                    "model": settings.LONG_TERM_MEMORY_EMBEDDER_MODEL,
+                    "model": self._settings.LONG_TERM_MEMORY_EMBEDDER_MODEL,
                     **mem0_openai_config,
                 },
             },
         }
 
-        if settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS:
-            config["custom_instructions"] = settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS
+        if self._settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS:
+            config["custom_instructions"] = self._settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS
 
         return config
 
@@ -116,4 +117,3 @@ class MemoryService:
         asyncio.create_task(self.add(user_id, messages, metadata))
 
 
-memory_service = MemoryService()

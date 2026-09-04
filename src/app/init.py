@@ -1,40 +1,26 @@
-from langfuse import get_client
-from langfuse.langchain import CallbackHandler
-
+from src.app.core.db.factory import make_database_cached
+from src.app.core.session.factory import make_session_repository
+from src.app.core.tracing.factory import (
+    init_langfuse,
+    make_langfuse_callback_handler,
+    shutdown_langfuse,
+)
+from src.app.core.user.factory import make_user_repository
+from src.app.core.mcp.session_manager import get_mcp_session_manager
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
-from src.app.core.db.database import database_factory
-from src.app.core.mcp.session_manager import get_mcp_session_manager
-from src.app.core.session import SessionRepository
-from src.app.core.user import UserRepository
 
-dbsession = database_factory.get_session_maker()
-user_repository = UserRepository(dbsession)
-session_repository = SessionRepository(dbsession)
+dbsession = make_database_cached().get_session_maker()
+user_repository = make_user_repository(dbsession)
+session_repository = make_session_repository(dbsession)
 
 
 def langfuse_init():
-    langfuse = get_client()
-
-    if langfuse.auth_check():
-        logger.info("langfuse_auth_success")
-    else:
-        logger.error("langfuse_auth_failure")
+    init_langfuse(settings)
 
 
 def langfuse_shutdown():
-    get_client().shutdown()
-    logger.info("langfuse_shutdown_complete")
-
-
-def get_langfuse_callback_handler() -> CallbackHandler:
-    """Create a Langfuse CallbackHandler for tracking LLM interactions.
-
-    Returns:
-        CallbackHandler: Configured Langfuse callback handler.
-    """
-
-    return CallbackHandler()
+    shutdown_langfuse()
 
 
 async def mcp_dependencies_init():
@@ -59,4 +45,4 @@ async def mcp_dependencies_cleanup():
         logger.info("mcp_cleanup_skipped")
 
 
-langfuse_callback_handler = get_langfuse_callback_handler()
+langfuse_callback_handler = make_langfuse_callback_handler()
