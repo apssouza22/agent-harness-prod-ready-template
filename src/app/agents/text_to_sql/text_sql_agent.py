@@ -42,7 +42,7 @@ class TextSQLDeepAgent:
                 LoggingMiddleware(),
                 LlmMetricsMiddleware(),
                 ErrorHandlingMiddleware(),
-                GuardrailMiddleware(),
+                GuardrailMiddleware(langfuse_tracer=langfuse_tracer),
             ],
             invoke_fn=self._core_invoke,
         )

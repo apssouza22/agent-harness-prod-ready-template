@@ -81,7 +81,7 @@ class DeepResearchAgent:
                     build_trace_output=self._build_trace_output,
                 ),
                 LoggingMiddleware(),
-                GuardrailMiddleware(),
+                GuardrailMiddleware(langfuse_tracer=langfuse_tracer),
                 LlmMetricsMiddleware(),
                 ErrorHandlingMiddleware(),
                 MemoryMiddleware(),

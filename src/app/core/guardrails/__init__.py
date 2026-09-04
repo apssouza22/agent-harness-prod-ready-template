@@ -10,7 +10,7 @@ Usage with agent middleware:
     from src.app.core.middleware import GuardrailMiddleware
 
     pipeline = AgentPipeline(
-        middlewares=[GuardrailMiddleware(), ...],
+        middlewares=[GuardrailMiddleware(langfuse_tracer=tracer), ...],
         invoke_fn=core_invoke,
     )
 

@@ -1,7 +1,7 @@
 """Output guardrail service — PII redaction and safety evaluation."""
 
 import time
-from typing import Any
+from typing import Any, Optional
 
 from src.app.core.guardrails.constants import OUTPUT_REDACT_PII_TYPES
 from src.app.core.guardrails.pii import PIIStrategy, apply_pii_strategy, detect_pii
@@ -14,6 +14,7 @@ from src.app.core.guardrails.results import (
 from src.app.core.guardrails.safety_check import evaluate_safety, get_safe_replacement_message
 from src.app.core.guardrails.tracing import guardrail_span
 from src.app.core.common.logging import logger
+from src.app.core.langfuse.client import LangfuseTracer
 from src.app.core.metrics.metrics import (
     guardrail_check_duration_seconds,
     guardrail_checks_total,
@@ -29,16 +30,19 @@ class OutputGuardrail:
         self,
         config: OutputGuardrailConfig | None = None,
         source: GuardrailSource = GuardrailSource.MIDDLEWARE,
+        langfuse_tracer: Optional[LangfuseTracer] = None,
     ):
         self._config = config or OutputGuardrailConfig()
         self._source = source
+        self._langfuse_tracer = langfuse_tracer
         self._redact_pii_types = self._config.redact_pii_types or OUTPUT_REDACT_PII_TYPES
         self._pii_strategy = self._config.pii_strategy or PIIStrategy.REDACT
 
     async def validate(
         self,
         content: str,
-        tracing_ctx: Any | None = None,
+        *,
+        trace: Any | None = None,
     ) -> OutputGuardrailResult:
         """Run output guardrail checks on the given content."""
         if not content:
@@ -50,9 +54,10 @@ class OutputGuardrail:
 
         with guardrail_span(
             "guardrail_output_validation",
+            tracer=self._langfuse_tracer,
+            trace=trace,
             input_data={"content_length": len(content)},
             metadata={"guardrail_type": "output", "source": self._source.value},
-            ctx=tracing_ctx,
         ) as span_result:
             if self._config.pii_redact_enabled:
                 modified_content, pii_action, detected = self._run_pii_redaction(modified_content)

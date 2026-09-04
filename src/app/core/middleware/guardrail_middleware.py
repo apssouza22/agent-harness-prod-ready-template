@@ -20,6 +20,7 @@ from src.app.core.guardrails.results import (
     OutputAction,
     OutputGuardrailConfig,
 )
+from src.app.core.langfuse.client import LangfuseTracer
 
 
 class GuardrailMiddleware(AgentMiddleware):
@@ -27,6 +28,7 @@ class GuardrailMiddleware(AgentMiddleware):
 
     def __init__(
         self,
+        langfuse_tracer: Optional[LangfuseTracer] = None,
         input_filter: bool = True,
         input_pii_block: bool = True,
         output_pii_redact: bool = True,
@@ -41,6 +43,7 @@ class GuardrailMiddleware(AgentMiddleware):
                 block_pii_types=block_pii_types,
             ),
             source=GuardrailSource.MIDDLEWARE,
+            langfuse_tracer=langfuse_tracer,
         )
         self._output_guardrail = OutputGuardrail(
             config=OutputGuardrailConfig(
@@ -49,11 +52,13 @@ class GuardrailMiddleware(AgentMiddleware):
                 redact_pii_types=redact_pii_types,
             ),
             source=GuardrailSource.MIDDLEWARE,
+            langfuse_tracer=langfuse_tracer,
         )
 
     async def before_invoke(self, ctx: AgentContext) -> Optional[InvokeResult]:
         last_content = ctx.messages[-1].content if ctx.messages else ""
-        result = await self._input_guardrail.validate(last_content, tracing_ctx=ctx)
+        trace = ctx.metadata.get("trace")
+        result = await self._input_guardrail.validate(last_content, trace=trace)
 
         if not result.passed:
             if result.block_reason == InputBlockReason.CONTENT_FILTER:
@@ -83,7 +88,7 @@ class GuardrailMiddleware(AgentMiddleware):
 
         validation = await self._output_guardrail.validate(
             last_msg.content,
-            tracing_ctx=ctx,
+            trace=ctx.metadata.get("trace"),
         )
 
         if validation.modified:

@@ -5,7 +5,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.app.core.common.model.message import Message
-from src.app.core.guardrails.tracing import get_guardrail_tracing_context, guardrail_span
+from src.app.core.guardrails.input_guardrail import InputGuardrail
+from src.app.core.guardrails.tracing import guardrail_span
 from src.app.core.middleware.pipeline import AgentPipeline
 from src.app.core.middleware.types import AgentContext, build_invoke_config
 
@@ -31,16 +32,11 @@ async def test_guardrail_span_creates_child_span_under_active_trace():
     root_trace = MagicMock()
 
     async def core_invoke(ctx: AgentContext):
-        with guardrail_span(
-            "guardrail_input_validation",
-            input_data={"content_length": 2},
-            ctx=ctx,
-        ) as span_result:
-            span_result["output"] = {"status": "passed"}
+        guardrail = InputGuardrail(langfuse_tracer=tracer)
+        await guardrail.validate("hi", trace=ctx.metadata.get("trace"))
         return [Message(role="assistant", content="ok")]
 
     async def wrapped_invoke(inner_ctx: AgentContext):
-        inner_ctx.metadata["langfuse_tracer"] = tracer
         inner_ctx.metadata["trace"] = root_trace
         return await core_invoke(inner_ctx)
 
@@ -59,13 +55,6 @@ async def test_guardrail_span_creates_child_span_under_active_trace():
     span_name, span = tracer.created_spans[0]
     assert span_name == "guardrail_input_validation"
     assert span.end_output == {"status": "passed"}
-
-
-def test_get_guardrail_tracing_context_returns_none_without_active_ctx():
-    tracer, trace, ctx = get_guardrail_tracing_context()
-    assert tracer is None
-    assert trace is None
-    assert ctx is None
 
 
 def test_guardrail_span_noop_when_tracing_unavailable():
