@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlmodel import Session
 
-from src.app.core.checkpoint.factory import make_checkpointer, make_connection_pool, reset_connection_pool
+from src.app.core.checkpoint.factory import make_checkpoint_service, make_checkpointer
+from src.app.core.checkpoint.service import CheckpointService
+from src.app.core.db.connection_pool import get_connection_pool, reset_connection_pool
 from src.app.core.common import config as config_module
 from src.app.core.db.factory import make_database, make_database_fresh
 from src.app.core.llm import factory as llm_factory
@@ -96,16 +98,25 @@ def test_init_and_shutdown_langfuse(test_settings):
 
 
 @pytest.mark.asyncio
+async def test_make_checkpoint_service_returns_service(test_settings):
+    mock_pool = AsyncMock()
+    service = make_checkpoint_service(test_settings, connection_pool=mock_pool)
+
+    assert isinstance(service, CheckpointService)
+    assert service.settings is test_settings
+
+
+@pytest.mark.asyncio
 async def test_make_checkpointer_uses_injected_pool(test_settings):
     mock_pool = AsyncMock()
     mock_checkpointer = AsyncMock()
     mock_checkpointer.setup = AsyncMock()
 
     with patch(
-        "src.app.core.checkpoint.factory.AsyncPostgresSaver",
+        "src.app.core.checkpoint.service.AsyncPostgresSaver",
         return_value=mock_checkpointer,
     ) as mock_saver_cls:
-        checkpointer = await make_checkpointer(connection_pool=mock_pool, app_settings=test_settings)
+        checkpointer = await make_checkpointer(app_settings=test_settings, connection_pool=mock_pool)
 
     mock_saver_cls.assert_called_once_with(mock_pool)
     mock_checkpointer.setup.assert_awaited_once()
@@ -113,18 +124,33 @@ async def test_make_checkpointer_uses_injected_pool(test_settings):
 
 
 @pytest.mark.asyncio
-async def test_make_connection_pool_can_be_reset(test_settings):
-    with patch("src.app.core.checkpoint.factory.AsyncConnectionPool") as mock_pool_cls:
+async def test_checkpoint_service_clear_session_uses_pool(test_settings):
+    mock_pool = MagicMock()
+    mock_conn = AsyncMock()
+    mock_connection_cm = MagicMock()
+    mock_connection_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_connection_cm.__aexit__ = AsyncMock(return_value=None)
+    mock_pool.connection.return_value = mock_connection_cm
+
+    service = make_checkpoint_service(test_settings, connection_pool=mock_pool)
+    await service.clear_session("session-123")
+
+    assert mock_conn.execute.await_count == len(test_settings.CHECKPOINT_TABLES)
+
+
+@pytest.mark.asyncio
+async def test_get_connection_pool_can_be_reset(test_settings):
+    with patch("src.app.core.db.connection_pool.AsyncConnectionPool") as mock_pool_cls:
         mock_pool = AsyncMock()
         mock_pool.open = AsyncMock()
         mock_pool.close = AsyncMock()
         mock_pool_cls.return_value = mock_pool
 
-        pool = await make_connection_pool(test_settings)
+        pool = await get_connection_pool(test_settings)
         assert pool is mock_pool
 
         await reset_connection_pool()
         mock_pool.close.assert_awaited_once()
 
-        pool_again = await make_connection_pool(test_settings)
+        pool_again = await get_connection_pool(test_settings)
         assert pool_again is mock_pool

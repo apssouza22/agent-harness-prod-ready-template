@@ -13,6 +13,7 @@ from src.app.agents.open_deep_research.agent_deep_research import DeepResearchAg
 from src.app.agents.text_to_sql.text_sql_agent import TextSQLDeepAgent
 from src.app.api.security.auth import create_access_token, verify_token
 from src.app.api.v1.sanitization import sanitize_string
+from src.app.core.checkpoint.service import CheckpointService
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import bind_context, logger
 from src.app.core.db.database import DatabaseFactory
@@ -58,6 +59,10 @@ def get_memory_service(request: Request) -> MemoryService:
     return request.app.state.memory_service
 
 
+def get_checkpoint_service(request: Request) -> CheckpointService:
+    return request.app.state.checkpoint_service
+
+
 def get_langfuse_callback_handler(request: Request) -> CallbackHandler:
     return request.app.state.langfuse_callback_handler
 
@@ -80,6 +85,7 @@ SessionDep = Annotated[Session, Depends(get_db_session)]
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
 SessionRepositoryDep = Annotated[SessionRepository, Depends(get_session_repository)]
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]
+CheckpointServiceDep = Annotated[CheckpointService, Depends(get_checkpoint_service)]
 LangfuseCallbackHandlerDep = Annotated[CallbackHandler, Depends(get_langfuse_callback_handler)]
 ChatbotAgentDep = Annotated[AgentChatbot, Depends(get_chatbot_agent)]
 DeepResearchAgentDep = Annotated[DeepResearchAgent, Depends(get_deep_research_agent)]

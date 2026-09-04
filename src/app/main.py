@@ -21,7 +21,8 @@ from src.app.api.metrics.http_metrics import setup_metrics
 from src.app.api.metrics.middleware import MetricsMiddleware
 from src.app.api.security.limiter import setup_rate_limit
 from src.app.api.v1.api import api_router
-from src.app.core.checkpoint.factory import make_checkpointer, make_connection_pool, reset_connection_pool
+from src.app.core.checkpoint.factory import make_checkpoint_service
+from src.app.core.db.connection_pool import get_connection_pool, reset_connection_pool
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.db.factory import make_database
@@ -62,10 +63,11 @@ async def lifespan(app: FastAPI):
     app.state.langfuse_callback_handler = langfuse_callback_handler
     set_active_langfuse_callback_handler(langfuse_callback_handler)
 
-    connection_pool = await make_connection_pool(settings)
-    app.state.connection_pool = connection_pool
+    connection_pool = await get_connection_pool(settings)
+    checkpoint_service = make_checkpoint_service(settings, connection_pool=connection_pool)
+    app.state.checkpoint_service = checkpoint_service
 
-    checkpointer = await make_checkpointer(connection_pool, settings)
+    checkpointer = await checkpoint_service.get_checkpointer()
     app.state.checkpointer = checkpointer
 
     app.state.chatbot_agent = await make_chatbot_agent(checkpointer)

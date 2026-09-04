@@ -11,11 +11,10 @@ from fastapi.responses import StreamingResponse
 
 from src.app.api.security.limiter import limiter
 from src.app.api.v1.dtos.chat import ChatRequest, ChatResponse, StreamResponse
-from src.app.core.checkpoint.checkpointer import clear_checkpoints
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.metrics.metrics import llm_stream_duration_seconds
-from src.app.dependencies import ChatbotAgentDep, CurrentSessionDep
+from src.app.dependencies import ChatbotAgentDep, CheckpointServiceDep, CurrentSessionDep
 
 router = APIRouter()
 
@@ -114,10 +113,11 @@ async def get_session_messages(
 async def clear_chat_history(
     request: Request,
     session: CurrentSessionDep,
+    checkpoint_service: CheckpointServiceDep,
 ):
     """Clear all messages for a session."""
     try:
-        await clear_checkpoints(session.id)
+        await checkpoint_service.clear_session(session.id)
         return {"message": "Chat history cleared successfully"}
     except Exception as e:
         logger.error("clear_chat_history_failed", session_id=session.id, error=str(e), exc_info=True)

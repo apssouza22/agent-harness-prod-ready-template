@@ -127,13 +127,17 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 
     _app.dependency_overrides[dependencies.get_user_repository] = lambda: test_user_repo
     _app.dependency_overrides[dependencies.get_session_repository] = lambda: test_session_repo
+    mock_checkpoint_service = AsyncMock()
+    mock_checkpoint_service.get_checkpointer = AsyncMock(return_value=None)
+    mock_checkpoint_service.clear_session = AsyncMock()
+
+    _app.dependency_overrides[dependencies.get_checkpoint_service] = lambda: mock_checkpoint_service
     _app.dependency_overrides[dependencies.get_chatbot_agent] = lambda: _make_mock_chatbot_agent()
     _app.dependency_overrides[dependencies.get_deep_research_agent] = lambda: _make_mock_deep_research_agent()
     _app.dependency_overrides[dependencies.get_text_to_sql_agent] = lambda: _make_mock_text_sql_agent()
 
     with (
-        patch("src.app.main.make_connection_pool", new_callable=AsyncMock, return_value=None),
-        patch("src.app.main.make_checkpointer", new_callable=AsyncMock, return_value=None),
+        patch("src.app.main.make_checkpoint_service", return_value=mock_checkpoint_service),
         patch(
             "src.app.main.make_chatbot_agent",
             new_callable=AsyncMock,
@@ -149,7 +153,6 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
             new_callable=AsyncMock,
             return_value=_make_mock_text_sql_agent(),
         ),
-        patch("src.app.api.v1.chatbot.clear_checkpoints", new_callable=AsyncMock),
     ):
         async with _app.router.lifespan_context(_app):
             transport = ASGITransport(app=_app)
