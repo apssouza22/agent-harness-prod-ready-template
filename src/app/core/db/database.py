@@ -70,3 +70,8 @@ class DatabaseFactory:
             Session: A SQLModel session maker
         """
         return Session(self.engine)
+
+    def dispose(self) -> None:
+        """Dispose the database engine and release connection pool resources."""
+        self.engine.dispose()
+        logger.info("database_disposed")

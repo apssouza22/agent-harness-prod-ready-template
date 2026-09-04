@@ -17,7 +17,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from src.app.core.common.config import settings
 from src.app.core.common.model.message import Message
-from src.app.init import langfuse_callback_handler
+from src.app.core.tracing.callback import get_active_langfuse_callback_handler
 
 InvokeResult = list[Message]
 
@@ -146,8 +146,13 @@ def build_invoke_config(
     if user_id is not None:
         metadata["langfuse_user_id"] = str(user_id)
 
+    callbacks = []
+    langfuse_handler = get_active_langfuse_callback_handler()
+    if langfuse_handler is not None:
+        callbacks.append(langfuse_handler)
+
     return {
-        "callbacks": [langfuse_callback_handler],
+        "callbacks": callbacks,
         "run_name": agent_name,
         "configurable": {"thread_id": session_id},
         "metadata": metadata,

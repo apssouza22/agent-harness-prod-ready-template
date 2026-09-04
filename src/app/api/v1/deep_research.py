@@ -6,26 +6,15 @@ submitting a research query and streaming the research report.
 
 import json
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    Request,
-)
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from src.app.agents.open_deep_research import get_deep_research_agent
-from src.app.core.metrics.metrics import llm_stream_duration_seconds
 from src.app.api.security.limiter import limiter
-from src.app.api.v1.auth import get_current_session
-from src.app.api.v1.dtos.chat import (
-    ChatRequest,
-    ChatResponse,
-    StreamResponse,
-)
+from src.app.api.v1.dtos.chat import ChatRequest, ChatResponse, StreamResponse
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
-from src.app.core.session.session_model import Session
+from src.app.core.metrics.metrics import llm_stream_duration_seconds
+from src.app.dependencies import CurrentSessionDep, DeepResearchAgentDep
 
 router = APIRouter()
 
@@ -35,36 +24,18 @@ router = APIRouter()
 async def research(
     request: Request,
     chat_request: ChatRequest,
-    session: Session = Depends(get_current_session),
+    session: CurrentSessionDep,
+    agent: DeepResearchAgentDep,
 ):
-    """Submit a deep research query.
-
-    Accepts a user message describing the research topic and returns a
-    comprehensive research report generated through multi-step research.
-
-    Args:
-        request: The FastAPI request object for rate limiting.
-        chat_request: The request containing the research query messages.
-        session: The current session from the auth token.
-
-    Returns:
-        ChatResponse: The research report as a list of messages.
-
-    Raises:
-        HTTPException: If there's an error processing the request.
-    """
+    """Submit a deep research query."""
     try:
         logger.info(
             "deep_research_request_received",
             session_id=session.id,
             message_count=len(chat_request.messages),
         )
-
-        agent = await get_deep_research_agent()
         result = await agent.agent_invoke(chat_request.messages, session.id, user_id=session.user_id)
-
         logger.info("deep_research_request_processed", session_id=session.id)
-
         return ChatResponse(messages=result)
     except Exception as e:
         logger.error("deep_research_request_failed", session_id=session.id, error=str(e), exc_info=True)
@@ -76,26 +47,11 @@ async def research(
 async def research_stream(
     request: Request,
     chat_request: ChatRequest,
-    session: Session = Depends(get_current_session),
+    session: CurrentSessionDep,
+    agent: DeepResearchAgentDep,
 ):
-    """Submit a deep research query with streaming response.
-
-    Streams the research report as server-sent events while the multi-step
-    research workflow runs.
-
-    Args:
-        request: The FastAPI request object for rate limiting.
-        chat_request: The request containing the research query messages.
-        session: The current session from the auth token.
-
-    Returns:
-        StreamingResponse: A streaming response of the research report.
-
-    Raises:
-        HTTPException: If there's an error processing the request.
-    """
+    """Submit a deep research query with streaming response."""
     try:
-        agent = await get_deep_research_agent()
         logger.info(
             "deep_research_stream_request_received",
             session_id=session.id,
@@ -103,11 +59,6 @@ async def research_stream(
         )
 
         async def event_generator():
-            """Generate streaming events.
-
-            Yields:
-                str: Server-sent events in JSON format.
-            """
             try:
                 with llm_stream_duration_seconds.labels(model="deep_research", agent_name=agent.name).time():
                     async for chunk in agent.agent_invoke_stream(
@@ -118,7 +69,6 @@ async def research_stream(
 
                 final_response = StreamResponse(content="", done=True)
                 yield f"data: {json.dumps(final_response.model_dump())}\n\n"
-
             except Exception as e:
                 logger.error(
                     "deep_research_stream_failed",
@@ -130,7 +80,6 @@ async def research_stream(
                 yield f"data: {json.dumps(error_response.model_dump())}\n\n"
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
-
     except Exception as e:
         logger.error(
             "deep_research_stream_failed",
