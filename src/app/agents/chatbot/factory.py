@@ -11,15 +11,11 @@ from src.app.agents.chatbot.agent_chatbot import (
 from src.app.agents.tools import tools
 from src.app.core.common.config import settings
 from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
-from src.app.core.middleware import (
-    ErrorHandlingMiddleware,
-    GuardrailMiddleware,
-    LlmMetricsMiddleware,
-    LoggingMiddleware,
-    MemoryMiddleware,
-    SummarizationMiddleware,
-    TrimLongMessagesMiddleware,
-)
+from src.app.core.context import SummarizationMiddleware, TrimLongMessagesMiddleware
+from src.app.core.guardrails import GuardrailMiddleware
+from src.app.core.memory import MemoryMiddleware
+from src.app.core.metrics import LlmMetricsMiddleware
+from src.app.core.middleware import ErrorHandlingMiddleware, LoggingMiddleware
 
 
 async def make_chatbot_agent(

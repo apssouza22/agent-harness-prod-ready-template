@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.app.core.middleware.llm_metrics_middleware import LlmMetricsMiddleware
+from src.app.core.metrics.middleware import LlmMetricsMiddleware
 from src.app.core.middleware.types import AgentContext
 
 
@@ -32,11 +32,11 @@ async def test_llm_metrics_middleware_records_duration_and_tokens(monkeypatch):
                 incremented["out"] += value
 
     monkeypatch.setattr(
-        "src.app.core.middleware.llm_metrics_middleware.llm_inference_duration_seconds",
+        "src.app.core.metrics.middleware.llm_inference_duration_seconds",
         FakeHistogram(),
     )
     monkeypatch.setattr(
-        "src.app.core.middleware.llm_metrics_middleware.record_token_usage",
+        "src.app.core.metrics.middleware.record_token_usage",
         lambda response, model, agent_name: None,
     )
 

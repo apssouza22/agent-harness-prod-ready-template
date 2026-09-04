@@ -2,7 +2,7 @@
 
 An agent harness is the glue between a language model and everything else: tools, data, memory, and your app’s request/response boundary. At heart it is an LLM in a loop calling tools. Production is never just that loop. You want policies that always run, context that stays bounded, logging and metrics, and predictable behavior when something breaks.
 
-This doc is about agent middleware in this repo: a composable layer around invocations. It sits apart from the HTTP stack and from the raw LangGraph or Deep Agents graph. The idea matches what people call “agent middleware” in LangChain-style stacks: hooks around the loop, composable ordering, and room for both framework defaults and your own code. The code lives in `src/app/core/middleware/`; examples refer to this tree, not generic tutorials.
+This doc is about agent middleware in this repo: a composable layer around invocations. It sits apart from the HTTP stack and from the raw LangGraph or Deep Agents graph. The idea matches what people call “agent middleware” in LangChain-style stacks: hooks around the loop, composable ordering, and room for both framework defaults and your own code. The harness runner (`AgentPipeline`, `MiddlewareManager`, logging, errors) lives in `src/app/core/middleware/`; domain middleware (guardrails, memory, metrics, context trimming) lives in the matching packages under `src/app/core/`. Examples refer to this tree, not generic tutorials.
 
 For the wider harness story (FastAPI, auth, checkpointing, mem0, Langfuse, MCP, and the rest), see [ARTICLE.md](./ARTICLE.md).
 
@@ -57,7 +57,7 @@ You might see `before_agent`, `before_model`, `wrap_model_call`, `wrap_tool_call
 
 `before_model_call` and `after_model_call` only run if the graph node that talks to the model goes through the pipeline’s `MiddlewareManager`. The chatbot does that in `_chat_node` and `_tool_call_node` via `self._pipeline.manager` and `run_before_model_call`, `run_after_model_call`, `run_before_tool_call`, `run_after_tool_call`. That is cooperative: the pipeline and the nodes agree on the contract. Middleware is not implicit. Agents with a closed loop (for example Deep Agents from `create_deep_agent`) do not get those per-step hooks unless the framework calls them; this repo wraps the whole `ainvoke` in an outer `AgentPipeline` and can still attach LangChain `middleware` on the inner agent when needed.
 
-Invocation state lives in [`AgentContext`](../src/app/core/middleware/types.py): `messages`, `session_id`, `user_id`, `config` (Langfuse callbacks, thread id via `build_invoke_config`), `agent_name`, and a `metadata` dict middleware can read and write (for example `long_term_memory` from `MemoryMiddleware`).
+Invocation state lives in [`AgentContext`](../src/app/core/middleware/types.py): `messages`, `session_id`, `user_id`, `config` (Langfuse callbacks, thread id via `build_invoke_config`), `agent_name`, and a `metadata` dict middleware can read and write (for example `long_term_memory` from [`MemoryMiddleware`](../src/app/core/memory/middleware.py)).
 
 [`MiddlewareManager`](../src/app/core/middleware/pipeline.py) runs `before_*` in registration order and `after_*` in reverse order, same nesting feel as HTTP middleware stacks.
 
@@ -95,7 +95,7 @@ Below is how the tree is actually used, not a third-party walkthrough.
 
 Some rules should not live only in a prompt. Content policy and PII handling are deterministic and should run on every request.
 
-- [`GuardrailMiddleware`](../src/app/core/middleware/guardrail_middleware.py): `before_invoke` (content filter, block some PII on input), `after_invoke` (redact PII on assistant output, optional async safety check). It can return early from `before_invoke` so the model never runs on disallowed input.
+- [`GuardrailMiddleware`](../src/app/core/guardrails/middleware.py): `before_invoke` (content filter, block some PII on input), `after_invoke` (redact PII on assistant output, optional async safety check). It can return early from `before_invoke` so the model never runs on disallowed input.
 - The text-to-SQL agent uses the same outer pipeline for logging, errors, and guardrails, and passes LangChain `PIIMiddleware("email")` into `create_deep_agent` in `src/app/agents/text_to_sql/text_sql_agent.py`. Harness-level middleware wraps the whole invocation; framework middleware sits inside the Deep Agent loop for email.
 
 Compliance is not something you “prompt in”; it belongs in the harness.
@@ -104,12 +104,12 @@ Compliance is not something you “prompt in”; it belongs in the harness.
 
 Garbage in, garbage out on context. This project uses `before_model_call` to keep history inside budget:
 
-- [`SummarizationMiddleware`](../src/app/core/middleware/summarization_middleware.py) calls `summarize_if_too_long` from `src/app/core/context/` so long history is compressed before the model runs.
-- [`TrimLongMessagesMiddleware`](../src/app/core/middleware/trim_long_messages_middleware.py) uses LangChain `trim_messages` with a “last” strategy so recent messages survive when the list is too long.
+- [`SummarizationMiddleware`](../src/app/core/context/summarization_middleware.py) calls `summarize_if_too_long` from `src/app/core/context/` so long history is compressed before the model runs.
+- [`TrimLongMessagesMiddleware`](../src/app/core/context/trim_long_messages_middleware.py) uses LangChain `trim_messages` with a “last” strategy so recent messages survive when the list is too long.
 
 The chatbot registers both in `AgentChatbot` together with memory and logging (`src/app/agents/chatbot/agent_chatbot.py`).
 
-- [`MemoryMiddleware`](../src/app/core/middleware/memory_middleware.py): `before_invoke` runs `get_relevant_memory` and sets `ctx.metadata["long_term_memory"]`; `after_invoke` runs `bg_update_memory` from returned messages. Retrieval and write-back stay out of routing logic in the graph.
+- [`MemoryMiddleware`](../src/app/core/memory/middleware.py): `before_invoke` runs memory search and sets `ctx.metadata["long_term_memory"]`; `after_invoke` schedules a background memory update from returned messages. Retrieval and write-back stay out of routing logic in the graph.
 
 ### Dynamic control (tools, model, prompt)
 
@@ -121,7 +121,8 @@ Things demos skip but ops care about:
 
 - [`ErrorHandlingMiddleware`](../src/app/core/middleware/error_handling_middleware.py): `on_error`, LLM error metrics, and in non-dev environments an empty result instead of leaking stack traces to the client.
 - [`LoggingMiddleware`](../src/app/core/middleware/logging_middleware.py): invoke start/end; at debug, model and tool boundaries with `structlog` and fields like `agent_name`, `session_id`.
-- LLM calls often go through `model_invoke_with_metrics` in `src/app/core/metrics/`; the chatbot wraps the model with `.with_retry()` for flaky APIs. Same operational story as middleware, but some of that lives at the call site as well as in `on_error`.
+- [`LlmMetricsMiddleware`](../src/app/core/metrics/middleware.py): `before_model_call` / `after_model_call` for Prometheus inference duration and token usage on each LLM call inside the graph.
+- LLM calls may also go through `model_invoke_with_metrics` in `src/app/core/metrics/`; the chatbot wraps the model with `.with_retry()` for flaky APIs. Same operational story as middleware, but some of that lives at the call site as well as in `on_error`.
 
 ### Environment around the loop
 
@@ -131,7 +132,7 @@ Other writeups describe middleware that spins up a shell for the run. Here the c
 
 ## Deep Agents plus an outer pipeline
 
-Deep Agents (via `deepagents`) ship a full loop with strong defaults. In `TextSQLDeepAgent`, `create_sql_deep_agent()` passes `create_deep_agent` a model, SQL tools, filesystem backend, skills, and LangChain `PIIMiddleware` on the inner agent. `TextSQLDeepAgent` then wraps `agent.ainvoke` in `AgentPipeline` with `LoggingMiddleware`, `ErrorHandlingMiddleware`, and `GuardrailMiddleware`.
+Deep Agents (via `deepagents`) ship a full loop with strong defaults. In `TextSQLDeepAgent`, `create_sql_deep_agent()` passes `create_deep_agent` a model, SQL tools, filesystem backend, skills, and LangChain `PIIMiddleware` on the inner agent. `TextSQLDeepAgent` then wraps `agent.ainvoke` in `AgentPipeline` with `LoggingMiddleware`, `ErrorHandlingMiddleware`, and [`GuardrailMiddleware`](../src/app/core/guardrails/middleware.py).
 
 You end up with two layers: harness policies on every `agent_invoke`, and framework middleware inside the deep agent. The custom chatbot path uses an explicit LangGraph and wires per-step model and tool hooks to `MiddlewareManager`, which is more control and more node code.
 
@@ -141,12 +142,13 @@ You end up with two layers: harness policies on every `agent_invoke`, and framew
 
 Models will keep improving; some of today’s context trimming may move closer to the model over time. What does not live in weights is policy: what the org allows, what you log, how you fail, and how you reuse those rules across agents. Middleware splits those concerns into small classes with a defined order and keeps prompts, tools, and graph code from turning into an infrastructure dump.
 
-Shared behavior lives under `src/app/core/middleware/`; agents under `src/app/agents/` pick their stack when they build `AgentPipeline`. Start from `src/app/core/middleware/__init__.py` for exports and [`pipeline.py`](../src/app/core/middleware/pipeline.py) for execution order, then read the chatbot and text-to-SQL agents for the two integration styles.
+Shared harness behavior lives under `src/app/core/middleware/` (`AgentPipeline`, logging, errors); domain middleware lives in `guardrails/`, `memory/`, `metrics/`, and `context/`. Agents under `src/app/agents/` pick their stack when they build `AgentPipeline`. Start from `src/app/core/middleware/__init__.py` for harness exports, domain package `__init__.py` files for middleware classes, and [`pipeline.py`](../src/app/core/middleware/pipeline.py) for execution order, then read the chatbot and text-to-SQL agents for the two integration styles.
 
 ---
 
 ## Further reading
 
 - [Building a production-ready AI agent harness](./ARTICLE.md): HTTP middleware, auth, memory, observability, and the rest.
-- Types and runner: [`src/app/core/middleware/types.py`](../src/app/core/middleware/types.py), [`src/app/core/middleware/pipeline.py`](../src/app/core/middleware/pipeline.py)
+- Harness types and runner: [`src/app/core/middleware/types.py`](../src/app/core/middleware/types.py), [`src/app/core/middleware/pipeline.py`](../src/app/core/middleware/pipeline.py)
+- Domain middleware: [`guardrails/middleware.py`](../src/app/core/guardrails/middleware.py), [`memory/middleware.py`](../src/app/core/memory/middleware.py), [`metrics/middleware.py`](../src/app/core/metrics/middleware.py), [`context/summarization_middleware.py`](../src/app/core/context/summarization_middleware.py), [`context/trim_long_messages_middleware.py`](../src/app/core/context/trim_long_messages_middleware.py)
 - Reference wiring: [`src/app/agents/chatbot/agent_chatbot.py`](../src/app/agents/chatbot/agent_chatbot.py), [`src/app/agents/text_to_sql/text_sql_agent.py`](../src/app/agents/text_to_sql/text_sql_agent.py)

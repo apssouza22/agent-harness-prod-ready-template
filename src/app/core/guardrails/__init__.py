@@ -7,7 +7,7 @@ LangChain guardrails pattern:
 - **Model-based guardrails**: LLM safety evaluation for nuanced content checks
 
 Usage with agent middleware:
-    from src.app.core.middleware import GuardrailMiddleware
+    from src.app.core.guardrails import GuardrailMiddleware
 
     pipeline = AgentPipeline(
         middlewares=[GuardrailMiddleware(langfuse_tracer=tracer), ...],
@@ -23,6 +23,7 @@ Standalone usage:
 """
 
 from src.app.core.guardrails.constants import BLOCKED_INPUT_MESSAGE, BLOCKED_PII_MESSAGE
+from src.app.core.guardrails.middleware import GuardrailMiddleware
 from src.app.core.guardrails.content_filter import ContentFilterResult, check_content_filter
 from src.app.core.guardrails.input_guardrail import InputGuardrail
 from src.app.core.guardrails.output_guardrail import OutputGuardrail

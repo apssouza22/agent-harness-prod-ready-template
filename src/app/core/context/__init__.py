@@ -13,4 +13,6 @@ Usage:
 """
 
 from src.app.core.context.context_manager import truncate_tool_call_if_too_long
+from src.app.core.context.summarization_middleware import SummarizationMiddleware
 from src.app.core.context.summarizer import summarize_if_too_long
+from src.app.core.context.trim_long_messages_middleware import TrimLongMessagesMiddleware

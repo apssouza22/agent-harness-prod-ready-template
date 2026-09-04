@@ -50,13 +50,13 @@ src/
 │   │   ├── security/        # Auth and rate limiting
 │   │   └── logging_context.py
 │   └── core/                # Shared infrastructure
-│       ├── middleware/      # Composable agent middleware (AgentPipeline, hooks)
-│       ├── guardrails/      # Input/output safety
-│       ├── context/         # LLM context overflow prevention
-│       ├── memory/          # Long-term memory (mem0)
+│       ├── middleware/      # Agent harness (AgentPipeline, logging, errors)
+│       ├── guardrails/      # Input/output safety (+ GuardrailMiddleware)
+│       ├── context/         # Context overflow prevention (+ summarization/trim middleware)
+│       ├── memory/          # Long-term memory (mem0) (+ MemoryMiddleware)
 │       ├── checkpoint/      # State persistence
 │       ├── mcp/             # Model Context Protocol
-│       ├── metrics/         # Prometheus definitions
+│       ├── metrics/         # Prometheus definitions (+ LlmMetricsMiddleware)
 │       ├── llm/             # LLM factory (Bifrost routing) and utilities
 │       ├── db/              # Database connections
 │       └── common/          # Config, logging, models
@@ -65,7 +65,7 @@ src/
 └── cli/                     # CLI clients
 ```
 
-Agents live in self-contained directories under `src/app/agents/`: graph, prompt, tools. Auth, memory, checkpointing, guardrails, metrics, and the agent middleware stack in `src/app/core/middleware/` ([middleware article](./middleware-for-agent-harness.md)) come in through `src/app/core/`.
+Agents live in self-contained directories under `src/app/agents/`: graph, prompt, tools. Auth, memory, checkpointing, guardrails, metrics, and the agent harness (`AgentPipeline`, logging, errors) in `src/app/core/middleware/` ([middleware article](./middleware-for-agent-harness.md)) come in through `src/app/core/`. Domain-specific middleware lives alongside its package: `GuardrailMiddleware` in `guardrails/`, `MemoryMiddleware` in `memory/`, `LlmMetricsMiddleware` in `metrics/`, and `SummarizationMiddleware` / `TrimLongMessagesMiddleware` in `context/`.
 
 Three reference agents show three shapes of graph:
 
@@ -336,7 +336,7 @@ All three share the same harness infrastructure: guardrails, agent middleware, L
 
 FastAPI ships HTTP middleware: logging context, Prometheus, CORS. Agent middleware is a separate layer that wraps each `agent_invoke` and, when graph nodes cooperate, each model and tool call inside the loop. Cross-cutting behavior (logging, errors, memory, guardrails, context trimming) lives in small composable classes instead of copy-pasted `if` blocks in every node.
 
-The implementation is in `src/app/core/middleware/`. A deeper walkthrough with hook naming comparisons and integration trade-offs is in [How middleware shapes a production agent harness](./middleware-for-agent-harness.md).
+The harness infrastructure lives in `src/app/core/middleware/` (`AgentPipeline`, `MiddlewareManager`, logging, errors). Domain middleware classes live in their respective packages under `src/app/core/` (guardrails, memory, metrics, context). A deeper walkthrough with hook naming comparisons and integration trade-offs is in [How middleware shapes a production agent harness](./middleware-for-agent-harness.md).
 
 ### Pipeline and lifecycle hooks
 
@@ -407,14 +407,15 @@ async def agent_invoke(self, messages, session_id, user_id=None):
 
 ### Built-in middleware
 
-| Middleware | Hooks | Purpose |
-|---|---|---|
-| `LoggingMiddleware` | invoke, model, tool | Structured `structlog` events at each boundary |
-| `ErrorHandlingMiddleware` | `on_error` | LLM error metrics; re-raise in dev, empty result in prod |
-| `MemoryMiddleware` | `before_invoke`, `after_invoke` | mem0 retrieval before run, background update after |
-| `GuardrailMiddleware` | `before_invoke`, `after_invoke` | Content filter, PII block/redact, safety check (for agents without graph guardrail nodes) |
-| `SummarizationMiddleware` | `before_model_call` | Calls `summarize_if_too_long` before each LLM call |
-| `TrimLongMessagesMiddleware` | `before_model_call` | LangChain `trim_messages` with a "last" strategy |
+| Middleware | Package | Hooks | Purpose |
+|---|---|---|---|
+| `LoggingMiddleware` | `middleware/` | invoke, model, tool | Structured `structlog` events at each boundary |
+| `ErrorHandlingMiddleware` | `middleware/` | `on_error` | LLM error metrics; re-raise in dev, empty result in prod |
+| `LlmMetricsMiddleware` | `metrics/` | `before_model_call`, `after_model_call` | Prometheus inference duration and token usage |
+| `MemoryMiddleware` | `memory/` | `before_invoke`, `after_invoke` | mem0 retrieval before run, background update after |
+| `GuardrailMiddleware` | `guardrails/` | `before_invoke`, `after_invoke` | Content filter, PII block/redact, safety check (for agents without graph guardrail nodes) |
+| `SummarizationMiddleware` | `context/` | `before_model_call` | Calls `summarize_if_too_long` before each LLM call |
+| `TrimLongMessagesMiddleware` | `context/` | `before_model_call` | LangChain `trim_messages` with a "last" strategy |
 
 Each middleware extends `AgentMiddleware` and overrides only the hooks it needs; everything else defaults to a no-op.
 
@@ -581,7 +582,7 @@ The output guardrail fails open: if the safety model throws, the answer still go
 
 ## 5. Long-term memory (mem0 + pgvector)
 
-Per-user semantic memory sits in pgvector. Each invoke pulls similar memories first, then (after the run) extracts new ones from the conversation. In agents that use `AgentPipeline`, `MemoryMiddleware` handles both sides:
+Per-user semantic memory sits in pgvector. Each invoke pulls similar memories first, then (after the run) extracts new ones from the conversation. In agents that use `AgentPipeline`, [`MemoryMiddleware`](../src/app/core/memory/middleware.py) handles both sides:
 
 ```python
 class MemoryMiddleware(AgentMiddleware):
@@ -629,7 +630,7 @@ def bg_update_memory(user_id: int, messages: list[dict], metadata: dict = None) 
 
 ## 6. Context management
 
-Long threads and fat tool payloads blow the context window. `src/app/core/context/` holds the summarization and eviction logic; the chatbot exposes it through `SummarizationMiddleware` and `TrimLongMessagesMiddleware` on the `before_model_call` hook (see section 3) so every LLM turn gets a budget-safe message list without duplicating logic in `_chat_node`.
+Long threads and fat tool payloads blow the context window. `src/app/core/context/` holds the summarization and eviction logic; the chatbot exposes it through [`SummarizationMiddleware`](../src/app/core/context/summarization_middleware.py) and [`TrimLongMessagesMiddleware`](../src/app/core/context/trim_long_messages_middleware.py) on the `before_model_call` hook (see section 3) so every LLM turn gets a budget-safe message list without duplicating logic in `_chat_node`.
 
 ### Layer 1: tool result eviction
 
@@ -1247,9 +1248,10 @@ For ReAct agents, use `AGENTS.md` to define the agent's identity, rules, and pla
 Follow the pattern from the reference agent that matches your chosen architecture. Wire an `AgentPipeline` with the middleware your agent needs (section 3), then implement `_core_invoke` for graph logic only:
 
 ```python
+from src.app.core.memory import MemoryMiddleware
 from src.app.core.middleware import (
     AgentContext, AgentPipeline, build_invoke_config,
-    ErrorHandlingMiddleware, LoggingMiddleware, MemoryMiddleware,
+    ErrorHandlingMiddleware, LoggingMiddleware,
 )
 
 class MyAgent:
@@ -1304,7 +1306,7 @@ async def chat(request: Request, chat_request: ChatRequest, session=Depends(get_
     return ChatResponse(messages=result)
 ```
 
-Auth, checkpoints, metrics, tracing, Bifrost routing, and the shared middleware library stay outside your agent directory. Pick middleware from `src/app/core/middleware/` and compose your stack in `AgentPipeline`; see section 3 and [middleware-for-agent-harness.md](./middleware-for-agent-harness.md).
+Auth, checkpoints, metrics, tracing, Bifrost routing, and the shared harness library stay outside your agent directory. Compose `AgentPipeline` with harness middleware from `src/app/core/middleware/` and domain middleware from `guardrails/`, `memory/`, `metrics/`, and `context/`; see section 3 and [middleware-for-agent-harness.md](./middleware-for-agent-harness.md).
 
 When creating models in your agent, use the LLM factory so Bifrost routing applies automatically:
 

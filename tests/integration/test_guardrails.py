@@ -39,7 +39,7 @@ from src.app.core.guardrails.safety_check import (
     get_safe_replacement_message,
 )
 from src.app.core.common.model.message import Message
-from src.app.core.middleware.guardrail_middleware import GuardrailMiddleware
+from src.app.core.guardrails.middleware import GuardrailMiddleware
 from src.app.core.middleware.types import AgentContext
 from src.app.core.metrics.metrics import (
     guardrail_checks_total,

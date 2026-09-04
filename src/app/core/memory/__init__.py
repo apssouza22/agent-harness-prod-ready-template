@@ -7,7 +7,10 @@ from src.app.core.memory.memory import MemoryService
 
 memory_service = make_memory_service_cached()
 
+from src.app.core.memory.middleware import MemoryMiddleware
+
 __all__ = [
+    "MemoryMiddleware",
     "MemoryService",
     "make_memory_service",
     "make_memory_service_cached",

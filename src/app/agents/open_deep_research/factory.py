@@ -9,13 +9,10 @@ from src.app.agents.open_deep_research.agent_deep_research import (
 )
 from src.app.core.common.config import settings
 from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
-from src.app.core.middleware import (
-    ErrorHandlingMiddleware,
-    GuardrailMiddleware,
-    LlmMetricsMiddleware,
-    LoggingMiddleware,
-    MemoryMiddleware,
-)
+from src.app.core.guardrails import GuardrailMiddleware
+from src.app.core.memory import MemoryMiddleware
+from src.app.core.metrics import LlmMetricsMiddleware
+from src.app.core.middleware import ErrorHandlingMiddleware, LoggingMiddleware
 
 
 async def make_deep_research_agent(

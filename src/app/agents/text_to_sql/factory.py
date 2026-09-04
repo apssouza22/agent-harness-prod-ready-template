@@ -7,12 +7,9 @@ from src.app.agents.text_to_sql.text_sql_agent import (
 )
 from src.app.core.common.config import settings
 from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
-from src.app.core.middleware import (
-    ErrorHandlingMiddleware,
-    GuardrailMiddleware,
-    LlmMetricsMiddleware,
-    LoggingMiddleware,
-)
+from src.app.core.guardrails import GuardrailMiddleware
+from src.app.core.metrics import LlmMetricsMiddleware
+from src.app.core.middleware import ErrorHandlingMiddleware, LoggingMiddleware
 
 
 async def make_text_to_sql_agent(langfuse_tracer: LangfuseTracer | None = None) -> TextSQLDeepAgent:

@@ -8,7 +8,7 @@ actual summarization logic is delegated to
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from src.app.core.context import summarize_if_too_long
+from src.app.core.context.summarizer import summarize_if_too_long
 from src.app.core.middleware.types import AgentContext, AgentMiddleware
 
 
