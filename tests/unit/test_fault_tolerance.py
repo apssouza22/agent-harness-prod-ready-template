@@ -15,6 +15,7 @@ from src.app.core.fault_tolerance.policies import (
     get_llm_timeout_policy,
     get_tool_retry_policy,
 )
+from src.app.core.graph import END
 from src.app.core.common.config import settings
 from src.app.core.common.model.graph import GraphState
 
@@ -43,12 +44,12 @@ async def test_chat_error_handler_routes_to_fallback():
     handler = create_chat_node_error_handler(
         agent_name="test-agent",
         model_name="gpt-test",
-        fallback_goto="output_guardrail",
+        fallback_goto=END,
     )
     state = GraphState(messages=[HumanMessage(content="hello")])
     command = await handler(state, NodeError(node="chat", error=RuntimeError("provider down")))
 
-    assert command.goto == "output_guardrail"
+    assert command.goto == END
     assert command.update["failed_node"] == "chat"
     assert command.update["messages"][0].content == LLM_UNAVAILABLE_MESSAGE
 

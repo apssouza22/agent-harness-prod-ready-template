@@ -17,13 +17,13 @@ from src.app.core.middleware import (
     AgentPipeline,
     build_invoke_config,
     ErrorHandlingMiddleware,
+    GuardrailMiddleware,
     LlmMetricsMiddleware,
     LoggingMiddleware,
     MemoryMiddleware,
     SummarizationMiddleware,
     TrimLongMessagesMiddleware,
 )
-from src.app.core.guardrails import create_input_guardrail_node, create_output_guardrail_node
 from src.app.core.common.config import settings
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
@@ -80,6 +80,7 @@ class AgentChatbot:
                     build_trace_output=self._build_trace_output,
                 ),
                 LoggingMiddleware(),
+                GuardrailMiddleware(),
                 LlmMetricsMiddleware(),
                 ErrorHandlingMiddleware(),
                 MemoryMiddleware(),
@@ -339,27 +340,23 @@ class AgentChatbot:
             environment=settings.ENVIRONMENT.value,
         )
 
-        goto = "tool_call" if response_message.tool_calls else "output_guardrail"
+        goto = "tool_call" if response_message.tool_calls else END
 
         return Command(update={"messages": [response_message]}, goto=goto)
 
     async def _create_graph(self) -> GraphBuilder:
         try:
-            input_guardrail = create_input_guardrail_node(next_node="chat")
-            output_guardrail = create_output_guardrail_node()
-
             graph_builder = GraphBuilder(GraphState).set_middleware_manager(self._pipeline.manager)
-            graph_builder.add_node("input_guardrail", input_guardrail, ends=["chat", END])
             graph_builder.add_node(
                 "chat",
                 self._chat_node,
-                ends=["tool_call", "output_guardrail"],
+                ends=["tool_call", END],
                 retry_policy=get_llm_retry_policy(),
                 timeout=get_llm_timeout_policy(),
                 error_handler=create_chat_node_error_handler(
                     agent_name=self.name,
                     model_name=settings.DEFAULT_LLM_MODEL,
-                    fallback_goto="output_guardrail",
+                    fallback_goto=END,
                 ),
             )
             graph_builder.add_node(
@@ -373,9 +370,7 @@ class AgentChatbot:
                     fallback_goto="chat",
                 ),
             )
-            graph_builder.add_node("output_guardrail", output_guardrail)
-            graph_builder.set_entry_point("input_guardrail")
-            graph_builder.add_edge("output_guardrail", END)
+            graph_builder.set_entry_point("chat")
             return graph_builder
         except Exception as e:
             logger.error("graph_creation_failed", error=str(e), environment=settings.ENVIRONMENT.value)

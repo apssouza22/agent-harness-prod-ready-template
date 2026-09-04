@@ -22,11 +22,11 @@ from src.app.core.middleware import (
     AgentPipeline,
     build_invoke_config,
     ErrorHandlingMiddleware,
+    GuardrailMiddleware,
     LlmMetricsMiddleware,
     LoggingMiddleware,
     MemoryMiddleware,
 )
-from src.app.core.guardrails import create_input_guardrail_node, create_output_guardrail_node
 from src.app.core.fault_tolerance import (
     create_deep_research_error_handler,
     get_llm_retry_policy,
@@ -81,6 +81,7 @@ class DeepResearchAgent:
                     build_trace_output=self._build_trace_output,
                 ),
                 LoggingMiddleware(),
+                GuardrailMiddleware(),
                 LlmMetricsMiddleware(),
                 ErrorHandlingMiddleware(),
                 MemoryMiddleware(),
@@ -210,25 +211,18 @@ class DeepResearchAgent:
         Returns:
             GraphBuilder: The uncompiled deep research graph builder.
         """
-        input_guardrail = create_input_guardrail_node(next_node="clarify_with_user")
-        output_guardrail = create_output_guardrail_node()
-
         deep_researcher_builder = GraphBuilder(AgentState, input_schema=AgentInputState)
 
         llm_error_handler = create_deep_research_error_handler(
             agent_name=self.name,
             model_name=RESEARCH_MODEL,
-            fallback_goto="output_guardrail",
+            fallback_goto=END,
         )
         llm_fault_tolerance = {
             "retry_policy": get_llm_retry_policy(),
             "timeout": get_llm_timeout_policy(),
             "error_handler": llm_error_handler,
         }
-
-        # Guardrail nodes wrap the entire research workflow
-        deep_researcher_builder.add_node("input_guardrail", input_guardrail, ends=["clarify_with_user", END])
-        deep_researcher_builder.add_node("output_guardrail", output_guardrail)
 
         # Main workflow nodes for the complete research process
         deep_researcher_builder.add_node("clarify_with_user", clarify_with_user, **llm_fault_tolerance)
@@ -242,10 +236,9 @@ class DeepResearchAgent:
         )
         deep_researcher_builder.add_node("final_report_generation", final_report_generation, **llm_fault_tolerance)
 
-        # Workflow edges: input_guardrail → research pipeline → output_guardrail
-        deep_researcher_builder.add_edge(START, "input_guardrail")
+        # Workflow edges: research pipeline
+        deep_researcher_builder.add_edge(START, "clarify_with_user")
         deep_researcher_builder.add_edge("research_supervisor", "final_report_generation")
-        deep_researcher_builder.add_edge("final_report_generation", "output_guardrail")
-        deep_researcher_builder.add_edge("output_guardrail", END)
+        deep_researcher_builder.add_edge("final_report_generation", END)
 
         return deep_researcher_builder
