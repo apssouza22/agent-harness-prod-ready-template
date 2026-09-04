@@ -36,7 +36,7 @@ async def research(
         )
         result = await agent.agent_invoke(chat_request.messages, session.id, user_id=session.user_id)
         logger.info("deep_research_request_processed", session_id=session.id)
-        return ChatResponse(messages=result)
+        return ChatResponse(messages=result, trace_id=agent.last_trace_id)
     except Exception as e:
         logger.error("deep_research_request_failed", session_id=session.id, error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

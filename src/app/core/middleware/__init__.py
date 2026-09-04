@@ -22,6 +22,7 @@ Usage::
 """
 
 from src.app.core.middleware.error_handling_middleware import ErrorHandlingMiddleware
+from src.app.core.middleware.langfuse_tracing_middleware import LangfuseTracingMiddleware
 from src.app.core.middleware.guardrail_middleware import GuardrailMiddleware
 from src.app.core.middleware.llm_metrics_middleware import LlmMetricsMiddleware
 from src.app.core.middleware.logging_middleware import LoggingMiddleware
@@ -36,3 +37,24 @@ from src.app.core.middleware.pipeline import (
 from src.app.core.middleware.summarization_middleware import SummarizationMiddleware
 from src.app.core.middleware.trim_long_messages_middleware import TrimLongMessagesMiddleware
 from src.app.core.middleware.types import AgentContext, AgentMiddleware, InvokeResult, NextFn, build_invoke_config
+
+__all__ = [
+    "AgentContext",
+    "AgentMiddleware",
+    "AgentPipeline",
+    "ErrorHandlingMiddleware",
+    "GuardrailMiddleware",
+    "InvokeResult",
+    "LangfuseTracingMiddleware",
+    "LlmMetricsMiddleware",
+    "LoggingMiddleware",
+    "MemoryMiddleware",
+    "MiddlewareManager",
+    "NextFn",
+    "SummarizationMiddleware",
+    "TrimLongMessagesMiddleware",
+    "build_invoke_config",
+    "get_active_middleware_manager",
+    "invoke_model",
+    "middleware_tool_wrappers",
+]

@@ -12,6 +12,7 @@ from src.app.core.common.model.message import Message
 from src.app.core.guardrails.content_filter import check_content_filter
 from src.app.core.guardrails.pii import PIIStrategy, PIIType, apply_pii_strategy, detect_pii
 from src.app.core.guardrails.safety_check import evaluate_safety, get_safe_replacement_message
+from src.app.core.guardrails.tracing import guardrail_span
 
 BLOCKED_INPUT_MESSAGE = (
     "I cannot process this request. Please rephrase your message and try again."
@@ -50,18 +51,36 @@ class GuardrailMiddleware(AgentMiddleware):
     async def before_invoke(self, ctx: AgentContext) -> Optional[InvokeResult]:
         last_content = ctx.messages[-1].content if ctx.messages else ""
 
-        if self._input_filter and last_content:
-            filter_result = check_content_filter(last_content)
-            if filter_result.is_blocked:
-                logger.info("middleware_input_guardrail_blocked", reason=filter_result.reason, session_id=ctx.session_id)
-                return [Message(role="assistant", content=BLOCKED_INPUT_MESSAGE)]
+        with guardrail_span(
+            "guardrail_input_validation",
+            input_data={"content_length": len(last_content)},
+            metadata={"guardrail_type": "input", "source": "middleware"},
+            ctx=ctx,
+        ) as span_result:
+            if self._input_filter and last_content:
+                filter_result = check_content_filter(last_content)
+                if filter_result.is_blocked:
+                    span_result["output"] = {
+                        "status": "blocked",
+                        "check": "content_filter",
+                        "reason": filter_result.reason,
+                    }
+                    logger.info("middleware_input_guardrail_blocked", reason=filter_result.reason, session_id=ctx.session_id)
+                    return [Message(role="assistant", content=BLOCKED_INPUT_MESSAGE)]
 
-        if self._input_pii_block and last_content:
-            pii_findings = detect_pii(last_content, pii_types=self._block_pii_types)
-            if pii_findings:
-                detected_types = list({f["type"].value for f in pii_findings})
-                logger.info("middleware_input_guardrail_pii_blocked", pii_types=detected_types, session_id=ctx.session_id)
-                return [Message(role="assistant", content=BLOCKED_PII_MESSAGE)]
+            if self._input_pii_block and last_content:
+                pii_findings = detect_pii(last_content, pii_types=self._block_pii_types)
+                if pii_findings:
+                    detected_types = list({f["type"].value for f in pii_findings})
+                    span_result["output"] = {
+                        "status": "blocked",
+                        "check": "pii",
+                        "pii_types": detected_types,
+                    }
+                    logger.info("middleware_input_guardrail_pii_blocked", pii_types=detected_types, session_id=ctx.session_id)
+                    return [Message(role="assistant", content=BLOCKED_PII_MESSAGE)]
+
+            span_result["output"] = {"status": "passed"}
 
         return None
 
@@ -75,23 +94,38 @@ class GuardrailMiddleware(AgentMiddleware):
 
         modified_content = last_msg.content
 
-        if self._output_pii_redact:
-            pii_findings = detect_pii(modified_content, pii_types=self._redact_pii_types)
-            if pii_findings:
-                redacted = apply_pii_strategy(modified_content, pii_findings, PIIStrategy.REDACT)
-                if redacted is not None:
-                    detected_types = list({f["type"].value for f in pii_findings})
-                    logger.info("middleware_output_guardrail_pii_redacted", pii_types=detected_types, session_id=ctx.session_id)
-                    modified_content = redacted
+        with guardrail_span(
+            "guardrail_output_validation",
+            input_data={"content_length": len(modified_content)},
+            metadata={"guardrail_type": "output", "source": "middleware"},
+            ctx=ctx,
+        ) as span_result:
+            output_actions: list[str] = []
 
-        if self._output_safety_check:
-            is_safe = await evaluate_safety(modified_content)
-            if not is_safe:
-                logger.warning("middleware_output_guardrail_safety_blocked", session_id=ctx.session_id)
-                modified_content = get_safe_replacement_message()
+            if self._output_pii_redact:
+                pii_findings = detect_pii(modified_content, pii_types=self._redact_pii_types)
+                if pii_findings:
+                    redacted = apply_pii_strategy(modified_content, pii_findings, PIIStrategy.REDACT)
+                    if redacted is not None:
+                        detected_types = list({f["type"].value for f in pii_findings})
+                        output_actions.append("pii_redacted")
+                        logger.info("middleware_output_guardrail_pii_redacted", pii_types=detected_types, session_id=ctx.session_id)
+                        modified_content = redacted
 
-        if modified_content != last_msg.content:
-            result = list(result)
-            result[-1] = Message(role="assistant", content=modified_content)
+            if self._output_safety_check:
+                is_safe = await evaluate_safety(modified_content)
+                if not is_safe:
+                    output_actions.append("safety_blocked")
+                    logger.warning("middleware_output_guardrail_safety_blocked", session_id=ctx.session_id)
+                    modified_content = get_safe_replacement_message()
+
+            if modified_content != last_msg.content:
+                result = list(result)
+                result[-1] = Message(role="assistant", content=modified_content)
+
+            span_result["output"] = {
+                "status": "modified" if output_actions else "passed",
+                "actions": output_actions,
+            }
 
         return result

@@ -13,6 +13,7 @@ from src.app.core.db.factory import make_database, make_database_fresh
 from src.app.core.llm import factory as llm_factory
 from src.app.core.memory.factory import make_memory_service, make_memory_service_fresh
 from src.app.core.session.factory import make_session_repository
+from src.app.core.langfuse.factory import make_langfuse_tracer
 from src.app.core.tracing.factory import (
     init_langfuse,
     make_langfuse_callback_handler,
@@ -79,17 +80,33 @@ def test_make_chat_model_uses_injected_settings(monkeypatch, test_settings):
     assert kwargs["api_key"] == "test-dummy-key"
 
 
+def test_make_langfuse_tracer_returns_tracer(test_settings, monkeypatch):
+    make_langfuse_tracer.cache_clear()
+    monkeypatch.setattr("src.app.core.langfuse.factory.get_settings", lambda: test_settings)
+    with patch("src.app.core.langfuse.client.Langfuse") as mock_langfuse_cls:
+        mock_client = MagicMock()
+        mock_client.auth_check.return_value = True
+        mock_langfuse_cls.return_value = mock_client
+
+        tracer = make_langfuse_tracer()
+
+    assert tracer.client is mock_client
+    mock_client.auth_check.assert_called_once()
+
+
 def test_make_langfuse_callback_handler_returns_handler():
     handler = make_langfuse_callback_handler()
 
     assert handler is not None
 
 
-def test_init_and_shutdown_langfuse(test_settings):
+def test_init_and_shutdown_langfuse(test_settings, monkeypatch):
+    make_langfuse_tracer.cache_clear()
+    monkeypatch.setattr("src.app.core.langfuse.factory.get_settings", lambda: test_settings)
     mock_client = MagicMock()
     mock_client.auth_check.return_value = True
 
-    with patch("src.app.core.tracing.factory.get_client", return_value=mock_client):
+    with patch("src.app.core.langfuse.client.Langfuse", return_value=mock_client):
         init_langfuse(test_settings)
         shutdown_langfuse()
 

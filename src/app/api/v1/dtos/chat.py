@@ -3,6 +3,7 @@
 
 from typing import (
     List,
+    Optional,
 )
 
 from pydantic import (
@@ -32,9 +33,11 @@ class ChatResponse(BaseModel):
 
     Attributes:
         messages: List of messages in the conversation.
+        trace_id: Langfuse trace ID for feedback and debugging.
     """
 
     messages: List[Message] = Field(..., description="List of messages in the conversation")
+    trace_id: Optional[str] = Field(None, description="Langfuse trace ID for feedback and debugging")
 
 
 class StreamResponse(BaseModel):

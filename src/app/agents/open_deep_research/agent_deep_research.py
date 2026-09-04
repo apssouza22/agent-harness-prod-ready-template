@@ -5,6 +5,7 @@ multi-subgraph deep research workflow with the project's checkpointing,
 Langfuse tracing, and session management infrastructure.
 """
 
+import time
 from typing import Any, AsyncGenerator, Optional
 
 from asgiref.sync import sync_to_async
@@ -14,12 +15,14 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import StateSnapshot
 
 from src.app.core.graph import END, GraphBuilder, START, StateGraphCompiled
+from src.app.core.langfuse.client import LangfuseTracer
 
 from src.app.core.middleware import (
     AgentContext,
     AgentPipeline,
     build_invoke_config,
     ErrorHandlingMiddleware,
+    LangfuseTracingMiddleware,
     LlmMetricsMiddleware,
     LoggingMiddleware,
     MemoryMiddleware,
@@ -64,18 +67,35 @@ class DeepResearchAgent:
     are not used directly by the graph nodes.
     """
 
-    def __init__(self, name: str, checkpointer: AsyncPostgresSaver):
+    def __init__(self, name: str, checkpointer: AsyncPostgresSaver, langfuse_tracer: Optional[LangfuseTracer] = None):
         self.name = name
         self.checkpointer = checkpointer
         self._graph: Optional[StateGraphCompiled] = None
+        self._last_trace_id: Optional[str] = None
         self._pipeline = AgentPipeline(
-            middlewares=[LoggingMiddleware(), LlmMetricsMiddleware(), ErrorHandlingMiddleware(), MemoryMiddleware()],
+            middlewares=[
+                LangfuseTracingMiddleware(
+                    langfuse_tracer=langfuse_tracer,
+                    trace_name="deep_research_request",
+                    environment=settings.ENVIRONMENT.value,
+                    build_trace_metadata=self._build_trace_metadata,
+                    build_trace_output=self._build_trace_output,
+                ),
+                LoggingMiddleware(),
+                LlmMetricsMiddleware(),
+                ErrorHandlingMiddleware(),
+                MemoryMiddleware(),
+            ],
             invoke_fn=self._core_invoke,
         )
 
         lead_researcher_tools = [tool(ConductResearch), tool(ResearchComplete), think_tool]
         self.researcher_subagent = ResearcherAgent("Researcher", get_all_tools())
         self.supervisor_subagent = SupervisorAgent("Supervisor", lead_researcher_tools)
+
+    @property
+    def last_trace_id(self) -> Optional[str]:
+        return self._last_trace_id
 
     async def compile(self) -> StateGraphCompiled:
         """Compile all subgraphs and the main deep research graph."""
@@ -105,15 +125,38 @@ class DeepResearchAgent:
         user_id: Optional[int] = None,
     ) -> list[Message] | list[Any]:
         """Invoke the deep research agent through the middleware pipeline."""
+        query = messages[-1].content if messages else ""
         ctx = AgentContext(
             messages=messages,
             session_id=session_id,
             user_id=user_id,
             config=build_invoke_config(session_id, user_id, self.name),
             agent_name=self.name,
-            metadata={"model_name": "deep_research"},
+            metadata={
+                "query": query,
+                "user_id": user_id,
+                "model_name": "deep_research",
+                "trace_metadata": {
+                    "service": "deep_research",
+                    "model": "deep_research",
+                },
+            },
         )
-        return await self._pipeline.run(ctx)
+        result = await self._pipeline.run(ctx)
+        self._last_trace_id = ctx.metadata.get("trace_id")
+        return result
+
+    def _build_trace_metadata(self, ctx: AgentContext) -> dict[str, Any]:
+        return dict(ctx.metadata.get("trace_metadata", {}))
+
+    def _build_trace_output(self, ctx: AgentContext, result: list[Message]) -> dict[str, Any]:
+        execution_time = time.time() - ctx.metadata.get("_trace_start_time", time.time())
+        answer = result[-1].content if result else ""
+        return {
+            "answer": answer,
+            "message_count": len(result),
+            "execution_time": execution_time,
+        }
 
     async def _core_invoke(self, ctx: AgentContext) -> list[Message]:
         """Core graph invocation without cross-cutting concerns."""
@@ -121,6 +164,7 @@ class DeepResearchAgent:
             input={"messages": dump_messages(ctx.messages)},
             config=ctx.config,
         )
+        ctx.metadata["graph_result"] = response
         return process_messages(response["messages"])
 
     async def agent_invoke_stream(

@@ -1,6 +1,6 @@
 """Request and response models for the Text-to-SQL API."""
 
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,6 +27,8 @@ class TextSQLResponse(BaseModel):
 
     Attributes:
         messages: List of messages from the agent's response.
+        trace_id: Langfuse trace ID for feedback and debugging.
     """
 
     messages: List[Message] = Field(..., description="Agent response messages")
+    trace_id: Optional[str] = Field(None, description="Langfuse trace ID for feedback and debugging")

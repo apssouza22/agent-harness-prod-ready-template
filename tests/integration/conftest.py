@@ -78,6 +78,7 @@ def _make_mock_chatbot_agent():
             Message(role="assistant", content="Hello!"),
         ]
     )
+    agent.last_trace_id = "trace-chatbot-1"
     return agent
 
 
@@ -93,6 +94,7 @@ def _make_mock_deep_research_agent():
             yield chunk
 
     agent.agent_invoke_stream = _fake_stream
+    agent.last_trace_id = "trace-deep-research-1"
     return agent
 
 
@@ -102,6 +104,7 @@ def _make_mock_text_sql_agent():
     agent.agent_invoke = AsyncMock(
         return_value=[Message(role="assistant", content="SELECT * FROM users;")]
     )
+    agent.last_trace_id = "trace-text-sql-1"
     return agent
 
 

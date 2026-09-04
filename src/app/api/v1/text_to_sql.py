@@ -36,7 +36,7 @@ async def text_to_sql_query(
         result = await agent.agent_invoke(messages, session.id, user_id=session.user_id)
 
         logger.info("text_to_sql_request_processed", session_id=session.id)
-        return TextSQLResponse(messages=result)
+        return TextSQLResponse(messages=result, trace_id=agent.last_trace_id)
     except Exception as e:
         logger.error(
             "text_to_sql_request_failed",

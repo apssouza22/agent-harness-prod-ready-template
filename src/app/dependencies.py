@@ -5,7 +5,6 @@ from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from langfuse.langchain import CallbackHandler
 from sqlmodel import Session
 
 from src.app.agents.chatbot.agent_chatbot import AgentChatbot
@@ -17,6 +16,7 @@ from src.app.core.checkpoint.service import CheckpointService
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import bind_context, logger
 from src.app.core.db.database import DatabaseFactory
+from src.app.core.langfuse.client import LangfuseTracer
 from src.app.core.memory.memory import MemoryService
 from src.app.core.session.session_model import Session as ChatSession
 from src.app.core.session.session_repository import SessionRepository
@@ -63,8 +63,8 @@ def get_checkpoint_service(request: Request) -> CheckpointService:
     return request.app.state.checkpoint_service
 
 
-def get_langfuse_callback_handler(request: Request) -> CallbackHandler:
-    return request.app.state.langfuse_callback_handler
+def get_langfuse_tracer(request: Request) -> LangfuseTracer:
+    return request.app.state.langfuse_tracer
 
 
 def get_chatbot_agent(request: Request) -> AgentChatbot:
@@ -86,7 +86,7 @@ UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
 SessionRepositoryDep = Annotated[SessionRepository, Depends(get_session_repository)]
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]
 CheckpointServiceDep = Annotated[CheckpointService, Depends(get_checkpoint_service)]
-LangfuseCallbackHandlerDep = Annotated[CallbackHandler, Depends(get_langfuse_callback_handler)]
+LangfuseDep = Annotated[LangfuseTracer, Depends(get_langfuse_tracer)]
 ChatbotAgentDep = Annotated[AgentChatbot, Depends(get_chatbot_agent)]
 DeepResearchAgentDep = Annotated[DeepResearchAgent, Depends(get_deep_research_agent)]
 TextToSqlAgentDep = Annotated[TextSQLDeepAgent, Depends(get_text_to_sql_agent)]

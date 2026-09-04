@@ -19,6 +19,7 @@ from langgraph.types import Command
 from src.app.core.guardrails.content_filter import ContentFilterResult, check_content_filter
 from src.app.core.guardrails.pii import PIIStrategy, PIIType, apply_pii_strategy, detect_pii
 from src.app.core.guardrails.safety_check import evaluate_safety, get_safe_replacement_message
+from src.app.core.guardrails.tracing import guardrail_span
 from src.app.core.common.logging import logger
 from src.app.core.metrics.metrics import (
     guardrail_checks_total,
@@ -103,45 +104,62 @@ def create_input_guardrail_node(
         if not content:
             return Command(goto=next_node)
 
-        start = time.perf_counter()
-        filter_result: ContentFilterResult = check_content_filter(
-            content,
-            banned_keywords=banned_keywords,
-            check_prompt_injection=prompt_injection_check,
-        )
-        guardrail_check_duration_seconds.labels(guardrail_type="input", check_type="content_filter").observe(
-            time.perf_counter() - start
-        )
-
-        if filter_result.is_blocked:
-            guardrail_checks_total.labels(guardrail_type="input", check_type="content_filter", result="blocked").inc()
-            guardrail_requests_blocked_total.labels(guardrail_type="input", reason="content_filter").inc()
-            logger.info("input_guardrail_blocked", reason=filter_result.reason)
-            return Command(
-                update={"messages": [AIMessage(content=BLOCKED_INPUT_MESSAGE)]},
-                goto=END,
-            )
-        guardrail_checks_total.labels(guardrail_type="input", check_type="content_filter", result="passed").inc()
-
-        if pii_check_enabled:
+        with guardrail_span(
+            "guardrail_input_validation",
+            input_data={"content_length": len(content)},
+            metadata={"guardrail_type": "input", "source": "graph_node"},
+        ) as span_result:
             start = time.perf_counter()
-            pii_findings = detect_pii(content, pii_types=block_pii_types)
-            guardrail_check_duration_seconds.labels(guardrail_type="input", check_type="pii").observe(
+            filter_result: ContentFilterResult = check_content_filter(
+                content,
+                banned_keywords=banned_keywords,
+                check_prompt_injection=prompt_injection_check,
+            )
+            guardrail_check_duration_seconds.labels(guardrail_type="input", check_type="content_filter").observe(
                 time.perf_counter() - start
             )
 
-            if pii_findings:
-                detected_types = list({f["type"].value for f in pii_findings})
-                for pii_type in detected_types:
-                    guardrail_pii_detections_total.labels(guardrail_type="input", pii_type=pii_type).inc()
-                guardrail_checks_total.labels(guardrail_type="input", check_type="pii", result="blocked").inc()
-                guardrail_requests_blocked_total.labels(guardrail_type="input", reason="pii").inc()
-                logger.info("input_guardrail_pii_blocked", pii_types=detected_types)
+            if filter_result.is_blocked:
+                guardrail_checks_total.labels(guardrail_type="input", check_type="content_filter", result="blocked").inc()
+                guardrail_requests_blocked_total.labels(guardrail_type="input", reason="content_filter").inc()
+                span_result["output"] = {
+                    "status": "blocked",
+                    "check": "content_filter",
+                    "reason": filter_result.reason,
+                }
+                logger.info("input_guardrail_blocked", reason=filter_result.reason)
                 return Command(
-                    update={"messages": [AIMessage(content=BLOCKED_PII_MESSAGE)]},
+                    update={"messages": [AIMessage(content=BLOCKED_INPUT_MESSAGE)]},
                     goto=END,
                 )
-            guardrail_checks_total.labels(guardrail_type="input", check_type="pii", result="passed").inc()
+            guardrail_checks_total.labels(guardrail_type="input", check_type="content_filter", result="passed").inc()
+
+            if pii_check_enabled:
+                start = time.perf_counter()
+                pii_findings = detect_pii(content, pii_types=block_pii_types)
+                guardrail_check_duration_seconds.labels(guardrail_type="input", check_type="pii").observe(
+                    time.perf_counter() - start
+                )
+
+                if pii_findings:
+                    detected_types = list({f["type"].value for f in pii_findings})
+                    for pii_type in detected_types:
+                        guardrail_pii_detections_total.labels(guardrail_type="input", pii_type=pii_type).inc()
+                    guardrail_checks_total.labels(guardrail_type="input", check_type="pii", result="blocked").inc()
+                    guardrail_requests_blocked_total.labels(guardrail_type="input", reason="pii").inc()
+                    span_result["output"] = {
+                        "status": "blocked",
+                        "check": "pii",
+                        "pii_types": detected_types,
+                    }
+                    logger.info("input_guardrail_pii_blocked", pii_types=detected_types)
+                    return Command(
+                        update={"messages": [AIMessage(content=BLOCKED_PII_MESSAGE)]},
+                        goto=END,
+                    )
+                guardrail_checks_total.labels(guardrail_type="input", check_type="pii", result="passed").inc()
+
+            span_result["output"] = {"status": "passed"}
 
         return Command(goto=next_node)
 
@@ -187,42 +205,56 @@ def create_output_guardrail_node(
 
         modified_content = content
 
-        if pii_redact_enabled:
-            start = time.perf_counter()
-            pii_findings = detect_pii(modified_content, pii_types=redact_pii_types)
-            guardrail_check_duration_seconds.labels(guardrail_type="output", check_type="pii").observe(
-                time.perf_counter() - start
-            )
+        with guardrail_span(
+            "guardrail_output_validation",
+            input_data={"content_length": len(content)},
+            metadata={"guardrail_type": "output", "source": "graph_node"},
+        ) as span_result:
+            output_actions: list[str] = []
 
-            if pii_findings:
-                redacted = apply_pii_strategy(modified_content, pii_findings, pii_strategy)
-                if redacted is not None:
-                    detected_types = list({f["type"].value for f in pii_findings})
-                    for pii_type in detected_types:
-                        guardrail_pii_detections_total.labels(guardrail_type="output", pii_type=pii_type).inc()
-                    guardrail_checks_total.labels(
-                        guardrail_type="output", check_type="pii", result="redacted"
-                    ).inc()
-                    guardrail_requests_blocked_total.labels(guardrail_type="output", reason="pii_redacted").inc()
-                    logger.info("output_guardrail_pii_redacted", pii_types=detected_types)
-                    modified_content = redacted
-            else:
-                guardrail_checks_total.labels(guardrail_type="output", check_type="pii", result="passed").inc()
+            if pii_redact_enabled:
+                start = time.perf_counter()
+                pii_findings = detect_pii(modified_content, pii_types=redact_pii_types)
+                guardrail_check_duration_seconds.labels(guardrail_type="output", check_type="pii").observe(
+                    time.perf_counter() - start
+                )
 
-        if safety_check_enabled:
-            start = time.perf_counter()
-            is_safe = await evaluate_safety(modified_content)
-            guardrail_check_duration_seconds.labels(guardrail_type="output", check_type="safety").observe(
-                time.perf_counter() - start
-            )
+                if pii_findings:
+                    redacted = apply_pii_strategy(modified_content, pii_findings, pii_strategy)
+                    if redacted is not None:
+                        detected_types = list({f["type"].value for f in pii_findings})
+                        for pii_type in detected_types:
+                            guardrail_pii_detections_total.labels(guardrail_type="output", pii_type=pii_type).inc()
+                        guardrail_checks_total.labels(
+                            guardrail_type="output", check_type="pii", result="redacted"
+                        ).inc()
+                        guardrail_requests_blocked_total.labels(guardrail_type="output", reason="pii_redacted").inc()
+                        output_actions.append("pii_redacted")
+                        logger.info("output_guardrail_pii_redacted", pii_types=detected_types)
+                        modified_content = redacted
+                else:
+                    guardrail_checks_total.labels(guardrail_type="output", check_type="pii", result="passed").inc()
 
-            if not is_safe:
-                guardrail_checks_total.labels(guardrail_type="output", check_type="safety", result="blocked").inc()
-                guardrail_requests_blocked_total.labels(guardrail_type="output", reason="safety").inc()
-                logger.warning("output_guardrail_safety_blocked")
-                modified_content = get_safe_replacement_message()
-            else:
-                guardrail_checks_total.labels(guardrail_type="output", check_type="safety", result="passed").inc()
+            if safety_check_enabled:
+                start = time.perf_counter()
+                is_safe = await evaluate_safety(modified_content)
+                guardrail_check_duration_seconds.labels(guardrail_type="output", check_type="safety").observe(
+                    time.perf_counter() - start
+                )
+
+                if not is_safe:
+                    guardrail_checks_total.labels(guardrail_type="output", check_type="safety", result="blocked").inc()
+                    guardrail_requests_blocked_total.labels(guardrail_type="output", reason="safety").inc()
+                    output_actions.append("safety_blocked")
+                    logger.warning("output_guardrail_safety_blocked")
+                    modified_content = get_safe_replacement_message()
+                else:
+                    guardrail_checks_total.labels(guardrail_type="output", check_type="safety", result="passed").inc()
+
+            span_result["output"] = {
+                "status": "modified" if output_actions else "passed",
+                "actions": output_actions,
+            }
 
         if modified_content != content:
             replacement = AIMessage(content=modified_content, id=last_ai_msg.id)

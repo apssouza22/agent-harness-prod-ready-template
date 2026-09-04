@@ -27,16 +27,8 @@ from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.db.factory import make_database
 from src.app.core.memory.factory import make_memory_service
+from src.app.core.langfuse.factory import make_langfuse_tracer
 from src.app.core.session.factory import make_session_repository
-from src.app.core.tracing.callback import (
-    clear_active_langfuse_callback_handler,
-    set_active_langfuse_callback_handler,
-)
-from src.app.core.tracing.factory import (
-    init_langfuse,
-    make_langfuse_callback_handler,
-    shutdown_langfuse,
-)
 from src.app.core.user.factory import make_user_repository
 from src.app.init import mcp_dependencies_cleanup, mcp_dependencies_init
 
@@ -48,7 +40,8 @@ async def lifespan(app: FastAPI):
     """Wire the full dependency graph onto app.state at startup."""
     app.state.settings = settings
 
-    init_langfuse(settings)
+    langfuse_tracer = make_langfuse_tracer()
+    app.state.langfuse_tracer = langfuse_tracer
 
     database = make_database(settings)
     app.state.database = database
@@ -59,10 +52,6 @@ async def lifespan(app: FastAPI):
 
     app.state.memory_service = make_memory_service(settings)
 
-    langfuse_callback_handler = make_langfuse_callback_handler()
-    app.state.langfuse_callback_handler = langfuse_callback_handler
-    set_active_langfuse_callback_handler(langfuse_callback_handler)
-
     connection_pool = await get_connection_pool(settings)
     checkpoint_service = make_checkpoint_service(settings, connection_pool=connection_pool)
     app.state.checkpoint_service = checkpoint_service
@@ -70,9 +59,9 @@ async def lifespan(app: FastAPI):
     checkpointer = await checkpoint_service.get_checkpointer()
     app.state.checkpointer = checkpointer
 
-    app.state.chatbot_agent = await make_chatbot_agent(checkpointer)
-    app.state.deep_research_agent = await make_deep_research_agent(checkpointer)
-    app.state.text_to_sql_agent = await make_text_to_sql_agent()
+    app.state.chatbot_agent = await make_chatbot_agent(checkpointer, langfuse_tracer=langfuse_tracer)
+    app.state.deep_research_agent = await make_deep_research_agent(checkpointer, langfuse_tracer=langfuse_tracer)
+    app.state.text_to_sql_agent = await make_text_to_sql_agent(langfuse_tracer=langfuse_tracer)
 
     logger.info(
         "application_startup",
@@ -87,8 +76,7 @@ async def lifespan(app: FastAPI):
 
     await mcp_dependencies_cleanup()
     await reset_connection_pool()
-    shutdown_langfuse()
-    clear_active_langfuse_callback_handler()
+    langfuse_tracer.shutdown()
     database.dispose()
 
     logger.info("application_shutdown")
