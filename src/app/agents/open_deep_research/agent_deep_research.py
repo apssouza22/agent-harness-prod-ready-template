@@ -6,6 +6,7 @@ Langfuse tracing, and session management infrastructure.
 """
 
 import time
+from collections.abc import Sequence
 from typing import Any, AsyncGenerator, Optional
 
 from asgiref.sync import sync_to_async
@@ -15,17 +16,11 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import StateSnapshot
 
 from src.app.core.graph import END, GraphBuilder, START, StateGraphCompiled
-from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
-
 from src.app.core.middleware import (
     AgentContext,
+    AgentMiddleware,
     AgentPipeline,
     build_invoke_config,
-    ErrorHandlingMiddleware,
-    GuardrailMiddleware,
-    LlmMetricsMiddleware,
-    LoggingMiddleware,
-    MemoryMiddleware,
 )
 from src.app.core.fault_tolerance import (
     create_deep_research_error_handler,
@@ -52,6 +47,20 @@ from src.app.core.llm.llm_utils import dump_messages, record_llm_error
 from src.app.core.memory import memory_service
 
 
+def build_deep_research_trace_metadata(ctx: AgentContext) -> dict[str, Any]:
+    return dict(ctx.metadata.get("trace_metadata", {}))
+
+
+def build_deep_research_trace_output(ctx: AgentContext, result: list[Message]) -> dict[str, Any]:
+    execution_time = time.time() - ctx.metadata.get("_trace_start_time", time.time())
+    answer = result[-1].content if result else ""
+    return {
+        "answer": answer,
+        "message_count": len(result),
+        "execution_time": execution_time,
+    }
+
+
 class DeepResearchAgent:
     """Deep Research agent using supervisor-researcher multi-subgraph architecture.
 
@@ -66,26 +75,18 @@ class DeepResearchAgent:
     are not used directly by the graph nodes.
     """
 
-    def __init__(self, name: str, checkpointer: AsyncPostgresSaver, langfuse_tracer: Optional[LangfuseTracer] = None):
+    def __init__(
+        self,
+        name: str,
+        checkpointer: AsyncPostgresSaver,
+        middlewares: Sequence[AgentMiddleware],
+    ):
         self.name = name
         self.checkpointer = checkpointer
         self._graph: Optional[StateGraphCompiled] = None
         self._last_trace_id: Optional[str] = None
         self._pipeline = AgentPipeline(
-            middlewares=[
-                LangfuseTracingMiddleware(
-                    langfuse_tracer=langfuse_tracer,
-                    trace_name="deep_research_request",
-                    environment=settings.ENVIRONMENT.value,
-                    build_trace_metadata=self._build_trace_metadata,
-                    build_trace_output=self._build_trace_output,
-                ),
-                LoggingMiddleware(),
-                GuardrailMiddleware(langfuse_tracer=langfuse_tracer),
-                LlmMetricsMiddleware(),
-                ErrorHandlingMiddleware(),
-                MemoryMiddleware(),
-            ],
+            middlewares=middlewares,
             invoke_fn=self._core_invoke,
         )
 
@@ -145,18 +146,6 @@ class DeepResearchAgent:
         result = await self._pipeline.run(ctx)
         self._last_trace_id = ctx.metadata.get("trace_id")
         return result
-
-    def _build_trace_metadata(self, ctx: AgentContext) -> dict[str, Any]:
-        return dict(ctx.metadata.get("trace_metadata", {}))
-
-    def _build_trace_output(self, ctx: AgentContext, result: list[Message]) -> dict[str, Any]:
-        execution_time = time.time() - ctx.metadata.get("_trace_start_time", time.time())
-        answer = result[-1].content if result else ""
-        return {
-            "answer": answer,
-            "message_count": len(result),
-            "execution_time": execution_time,
-        }
 
     async def _core_invoke(self, ctx: AgentContext) -> list[Message]:
         """Core graph invocation without cross-cutting concerns."""

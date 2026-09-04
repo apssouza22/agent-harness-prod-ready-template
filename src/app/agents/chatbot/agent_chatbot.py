@@ -1,6 +1,7 @@
 import os
 import time
 from datetime import datetime
+from collections.abc import Sequence
 from typing import Optional, Any, AsyncGenerator
 
 from asgiref.sync import sync_to_async
@@ -10,19 +11,11 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import RunnableConfig, Command, StateSnapshot
 
 from src.app.core.graph import END, GraphBuilder, StateGraphCompiled
-from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
-
 from src.app.core.middleware import (
     AgentContext,
+    AgentMiddleware,
     AgentPipeline,
     build_invoke_config,
-    ErrorHandlingMiddleware,
-    GuardrailMiddleware,
-    LlmMetricsMiddleware,
-    LoggingMiddleware,
-    MemoryMiddleware,
-    SummarizationMiddleware,
-    TrimLongMessagesMiddleware,
 )
 from src.app.core.common.config import settings
 from src.app.core.common.graph_utils import process_messages
@@ -53,6 +46,29 @@ chatbot_model = create_chat_model(
     max_tokens=settings.MAX_TOKENS,
 )
 
+
+def build_chatbot_trace_metadata(ctx: AgentContext) -> dict[str, Any]:
+    return dict(ctx.metadata.get("trace_metadata", {}))
+
+
+def build_chatbot_trace_output(ctx: AgentContext, result: list[Message]) -> dict[str, Any]:
+    execution_time = time.time() - ctx.metadata.get("_trace_start_time", time.time())
+    graph_result = ctx.metadata.get("graph_result")
+    answer = ""
+    if graph_result and graph_result.get("messages"):
+        openai_messages = convert_to_openai_messages(graph_result["messages"])
+        assistant_messages = [m for m in openai_messages if m.get("role") == "assistant" and m.get("content")]
+        if assistant_messages:
+            answer = str(assistant_messages[-1]["content"])
+    elif result:
+        answer = result[-1].content
+    return {
+        "answer": answer,
+        "message_count": len(result),
+        "execution_time": execution_time,
+    }
+
+
 class AgentChatbot:
     """Example agent to demonstrate the agentic framework."""
 
@@ -61,7 +77,7 @@ class AgentChatbot:
         name: str,
         tools: list[BaseTool],
         checkpointer: AsyncPostgresSaver,
-        langfuse_tracer: Optional[LangfuseTracer] = None,
+        middlewares: Sequence[AgentMiddleware],
     ):
         self.name = name
         self.checkpointer = checkpointer
@@ -71,28 +87,7 @@ class AgentChatbot:
         self._graph: Optional[StateGraphCompiled] = None
         self._last_trace_id: Optional[str] = None
         self._pipeline = AgentPipeline(
-            middlewares=[
-                LangfuseTracingMiddleware(
-                    langfuse_tracer=langfuse_tracer,
-                    trace_name="chatbot_request",
-                    environment=settings.ENVIRONMENT.value,
-                    build_trace_metadata=self._build_trace_metadata,
-                    build_trace_output=self._build_trace_output,
-                ),
-                LoggingMiddleware(),
-                GuardrailMiddleware(langfuse_tracer=langfuse_tracer),
-                LlmMetricsMiddleware(),
-                ErrorHandlingMiddleware(),
-                MemoryMiddleware(),
-                SummarizationMiddleware(
-                    llm=chatbot_model,
-                    model_name=f"openai:{settings.DEFAULT_LLM_MODEL}",
-                ),
-                TrimLongMessagesMiddleware(
-                    llm=chatbot_model,
-                    max_tokens=settings.MAX_TOKENS,
-                ),
-            ],
+            middlewares=middlewares,
             invoke_fn=self._core_invoke,
         )
 
@@ -140,26 +135,6 @@ class AgentChatbot:
         result = await self._pipeline.run(ctx)
         self._last_trace_id = ctx.metadata.get("trace_id")
         return result
-
-    def _build_trace_metadata(self, ctx: AgentContext) -> dict[str, Any]:
-        return dict(ctx.metadata.get("trace_metadata", {}))
-
-    def _build_trace_output(self, ctx: AgentContext, result: list[Message]) -> dict[str, Any]:
-        execution_time = time.time() - ctx.metadata.get("_trace_start_time", time.time())
-        graph_result = ctx.metadata.get("graph_result")
-        answer = ""
-        if graph_result and graph_result.get("messages"):
-            openai_messages = convert_to_openai_messages(graph_result["messages"])
-            assistant_messages = [m for m in openai_messages if m.get("role") == "assistant" and m.get("content")]
-            if assistant_messages:
-                answer = str(assistant_messages[-1]["content"])
-        elif result:
-            answer = result[-1].content
-        return {
-            "answer": answer,
-            "message_count": len(result),
-            "execution_time": execution_time,
-        }
 
     async def _core_invoke(self, ctx: AgentContext) -> list[Message]:
         """Core graph invocation without cross-cutting concerns."""

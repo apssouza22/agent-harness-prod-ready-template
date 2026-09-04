@@ -1,5 +1,6 @@
 import os
 import time
+from collections.abc import Sequence
 from typing import Any, Optional
 
 from deepagents import create_deep_agent
@@ -8,42 +9,40 @@ from langchain.agents.middleware import PIIMiddleware
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
 from src.app.core.llm.factory import create_openai_chat_model
-from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
 from src.app.core.middleware import (
     AgentContext,
+    AgentMiddleware,
     AgentPipeline,
     build_invoke_config,
-    ErrorHandlingMiddleware,
-    GuardrailMiddleware,
-    LlmMetricsMiddleware,
-    LoggingMiddleware,
 )
 from src.app.core.common.config import settings
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.model.message import Message
 
 
+def build_text_to_sql_trace_metadata(ctx: AgentContext) -> dict[str, Any]:
+    return dict(ctx.metadata.get("trace_metadata", {}))
+
+
+def build_text_to_sql_trace_output(ctx: AgentContext, result: list[Message]) -> dict[str, Any]:
+    execution_time = time.time() - ctx.metadata.get("_trace_start_time", time.time())
+    answer = result[-1].content if result else ""
+    return {
+        "answer": answer,
+        "message_count": len(result),
+        "execution_time": execution_time,
+    }
+
+
 class TextSQLDeepAgent:
     """SQL Deep Agent that can interact with a SQL database using natural language instructions."""
 
-    def __init__(self, name: str, langfuse_tracer: Optional[LangfuseTracer] = None):
+    def __init__(self, name: str, middlewares: Sequence[AgentMiddleware]):
         self.name = name
         self.agent = create_sql_deep_agent()
         self._last_trace_id: Optional[str] = None
         self._pipeline = AgentPipeline(
-            middlewares=[
-                LangfuseTracingMiddleware(
-                    langfuse_tracer=langfuse_tracer,
-                    trace_name="text_to_sql_request",
-                    environment=settings.ENVIRONMENT.value,
-                    build_trace_metadata=self._build_trace_metadata,
-                    build_trace_output=self._build_trace_output,
-                ),
-                LoggingMiddleware(),
-                LlmMetricsMiddleware(),
-                ErrorHandlingMiddleware(),
-                GuardrailMiddleware(langfuse_tracer=langfuse_tracer),
-            ],
+            middlewares=middlewares,
             invoke_fn=self._core_invoke,
         )
 
@@ -78,18 +77,6 @@ class TextSQLDeepAgent:
         result = await self._pipeline.run(ctx)
         self._last_trace_id = ctx.metadata.get("trace_id")
         return result
-
-    def _build_trace_metadata(self, ctx: AgentContext) -> dict[str, Any]:
-        return dict(ctx.metadata.get("trace_metadata", {}))
-
-    def _build_trace_output(self, ctx: AgentContext, result: list[Message]) -> dict[str, Any]:
-        execution_time = time.time() - ctx.metadata.get("_trace_start_time", time.time())
-        answer = result[-1].content if result else ""
-        return {
-            "answer": answer,
-            "message_count": len(result),
-            "execution_time": execution_time,
-        }
 
     async def _core_invoke(self, ctx: AgentContext) -> list[Message]:
         """Core agent invocation without cross-cutting concerns."""
