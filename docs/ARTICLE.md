@@ -1097,8 +1097,8 @@ Add these to your `.env` file (see `.env.example`):
 
 ```bash
 BIFROST_ENABLED=true
-BIFROST_BASE_URL=http://localhost:8081/langchain
-BIFROST_OPENAI_BASE_URL=http://localhost:8081/v1
+BIFROST_BASE_URL=http://localhost:8090/langchain
+BIFROST_OPENAI_BASE_URL=http://localhost:8090/v1
 BIFROST_API_KEY=dummy-key
 BIFROST_VIRTUAL_KEY=          # optional governance virtual key (x-bf-vk header)
 ```
@@ -1110,23 +1110,23 @@ BIFROST_BASE_URL=http://bifrost:8080/langchain
 BIFROST_OPENAI_BASE_URL=http://bifrost:8080/v1
 ```
 
-Provider API keys (`OPENAI_API_KEY`, etc.) are configured in Bifrost itself—via the Web UI at `http://localhost:8081` or through `observability/bifrost/config.json`—not passed through the application.
+Provider API keys (`OPENAI_API_KEY`, etc.) are configured in Bifrost itself—via the Web UI at `http://localhost:8090` or through `observability/bifrost/config.json`—not passed through the application.
 
 ### Docker Compose
 
-The stack includes a Bifrost service on host port **8081** (cAdvisor already binds 8080):
+The stack includes a Bifrost service on host port **8090** (cAdvisor already binds 8080):
 
 ```yaml
 bifrost:
   image: maximhq/bifrost:latest
   ports:
-    - "8081:8080"
+    - "8090:8080"
   environment:
     - APP_HOST=0.0.0.0
     - OPENAI_API_KEY=${OPENAI_API_KEY}
   volumes:
     - ./observability/bifrost/data:/app/data
-    - ./observability/bifrost/config.json:/app/config.json:ro
+    - ./observability/bifrost/config.json:/app/data/config.json:ro
 ```
 
 Start it with:
@@ -1135,7 +1135,7 @@ Start it with:
 docker compose up -d bifrost
 ```
 
-Open `http://localhost:8081` to add providers, virtual keys, and caching rules through the Bifrost UI.
+Open `http://localhost:8090` to add providers, virtual keys, and caching rules through the Bifrost UI.
 
 ---
 
@@ -1187,7 +1187,7 @@ ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
 CMD ["/app/.venv/bin/uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-Compose brings up Postgres (with pgvector), Bifrost (optional LLM gateway on port 8081), Prometheus scraping `/metrics`, Grafana dashboards (latency, LLM time, tokens, rate limits), and cAdvisor for container stats.
+Compose brings up Postgres (with pgvector), Bifrost (optional LLM gateway on port 8090), Prometheus scraping `/metrics`, Grafana dashboards (latency, LLM time, tokens, rate limits), and cAdvisor for container stats.
 
 Makefile targets wrap day-to-day tasks:
 

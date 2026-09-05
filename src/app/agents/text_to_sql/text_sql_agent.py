@@ -100,7 +100,12 @@ def create_sql_deep_agent():
     db_path = os.path.join(base_dir, "chinook.db")
     db = SQLDatabase.from_uri(f"sqlite:///{db_path}", sample_rows_in_table_info=3)
 
-    model = make_chat_model("openai:gpt-5-mini", reasoning={"effort": "medium"}, temperature=0)
+    model = make_chat_model(
+        "openai:gpt-5-mini",
+        reasoning={"effort": "medium"},
+        temperature=0,
+        bifrost_agent="agent_1",
+    )
 
     # Create SQL toolkit and get tools
     toolkit = SQLDatabaseToolkit(db=db, llm=model)

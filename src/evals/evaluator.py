@@ -46,6 +46,7 @@ class Evaluator:
             **build_openai_client_kwargs(
                 api_key=settings.EVALUATION_API_KEY,
                 base_url=settings.EVALUATION_BASE_URL,
+                bifrost_agent="agent_1",
             )
         )
         self.langfuse = Langfuse(

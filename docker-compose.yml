@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     env_file:
@@ -10,7 +8,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -90,21 +88,22 @@ services:
     restart: always
 
   bifrost:
-    image: maximhq/bifrost:latest
+    env_file:
+      - .env.development
+    image: maximhq/bifrost:v2.0.0
     ports:
-      - "8081:8080"
+      - "8090:8080"
     environment:
       - APP_HOST=0.0.0.0
       - APP_PORT=8080
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - LOG_LEVEL=info
+      - LOG_STYLE=pretty
     volumes:
       - ./observability/bifrost/data:/app/data
-      - ./observability/bifrost/config.json:/app/config.json:ro
+      - ./observability/bifrost/config.json:/app/data/config.json:ro
     networks:
       - monitoring
-    restart: always
+    restart: unless-stopped
 
 
 networks:

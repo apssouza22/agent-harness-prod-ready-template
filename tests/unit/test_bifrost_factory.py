@@ -17,6 +17,8 @@ def bifrost_settings(monkeypatch):
     monkeypatch.setenv("BIFROST_OPENAI_BASE_URL", "http://bifrost:8080/v1")
     monkeypatch.setenv("BIFROST_API_KEY", "test-dummy-key")
     monkeypatch.setenv("BIFROST_VIRTUAL_KEY", "test-virtual-key")
+    monkeypatch.setenv("BIFROST_API_KEY_AGENT_1", "sk-bf-agent-1-test")
+    monkeypatch.setenv("BIFROST_API_KEY_AGENT_2", "sk-bf-agent-2-test")
     updated_settings = config_module.Settings()
     monkeypatch.setattr(factory, "settings", updated_settings)
     return updated_settings
@@ -41,6 +43,26 @@ def test_build_chat_model_kwargs_with_bifrost(bifrost_settings):
     assert kwargs["max_tokens"] == 100
 
 
+def test_build_chat_model_kwargs_with_agent_1_virtual_key(bifrost_settings):
+    kwargs = factory.build_chat_model_kwargs(
+        model="openai:gpt-4o-mini",
+        max_tokens=100,
+        bifrost_agent="agent_1",
+    )
+
+    assert kwargs["default_headers"] == {"x-bf-vk": "sk-bf-agent-1-test"}
+
+
+def test_build_chat_model_kwargs_with_agent_2_virtual_key(bifrost_settings):
+    kwargs = factory.build_chat_model_kwargs(
+        model="openai:gpt-4o-mini",
+        max_tokens=100,
+        bifrost_agent="agent_2",
+    )
+
+    assert kwargs["default_headers"] == {"x-bf-vk": "sk-bf-agent-2-test"}
+
+
 def test_build_chat_model_kwargs_without_bifrost(direct_settings):
     kwargs = factory.build_chat_model_kwargs(model="openai:gpt-4o-mini", max_tokens=100)
 
@@ -51,14 +73,28 @@ def test_build_chat_model_kwargs_without_bifrost(direct_settings):
 def test_build_openai_client_kwargs_with_bifrost(bifrost_settings):
     kwargs = factory.build_openai_client_kwargs()
 
-    assert kwargs["api_key"] == "test-dummy-key"
+    assert kwargs["api_key"] == "test-virtual-key"
+    assert kwargs["base_url"] == "http://bifrost:8080/v1"
+
+
+def test_build_openai_client_kwargs_with_agent_1(bifrost_settings):
+    kwargs = factory.build_openai_client_kwargs(bifrost_agent="agent_1")
+
+    assert kwargs["api_key"] == "sk-bf-agent-1-test"
     assert kwargs["base_url"] == "http://bifrost:8080/v1"
 
 
 def test_build_mem0_openai_config_with_bifrost(bifrost_settings):
     mem0_config = factory.build_mem0_openai_config()
 
-    assert mem0_config["api_key"] == "test-dummy-key"
+    assert mem0_config["api_key"] == "test-virtual-key"
+    assert mem0_config["openai_base_url"] == "http://bifrost:8080/v1"
+
+
+def test_build_mem0_openai_config_with_agent_1(bifrost_settings):
+    mem0_config = factory.build_mem0_openai_config(bifrost_agent="agent_1")
+
+    assert mem0_config["api_key"] == "sk-bf-agent-1-test"
     assert mem0_config["openai_base_url"] == "http://bifrost:8080/v1"
 
 

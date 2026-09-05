@@ -37,7 +37,7 @@ class MemoryService:
 
     def _build_config(self) -> dict[str, Any]:
         """Build the mem0 configuration dictionary."""
-        mem0_openai_config = build_mem0_openai_config(app_settings=self._settings)
+        mem0_openai_config = build_mem0_openai_config(app_settings=self._settings, bifrost_agent="agent_1")
         config: dict[str, Any] = {
             "vector_store": {
                 "provider": "pgvector",

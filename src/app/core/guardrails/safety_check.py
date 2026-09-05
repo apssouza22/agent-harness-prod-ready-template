@@ -43,6 +43,7 @@ def _get_safety_model():
             api_key=settings.OPENAI_API_KEY,
             max_tokens=10,
             temperature=0,
+            bifrost_agent="agent_1",
         )
     return _safety_model
 

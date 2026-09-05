@@ -42,6 +42,7 @@ MAX_CONTENT_LENGTH = 50000
 configurable_model = make_chat_model(
     RESEARCH_MODEL,
     configurable_fields=("model", "max_tokens", "api_key"),
+    bifrost_agent="agent_2",
 )
 
 writer_model_config = {

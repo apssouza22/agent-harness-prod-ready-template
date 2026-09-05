@@ -150,6 +150,8 @@ class Settings:
         self.BIFROST_OPENAI_BASE_URL = os.getenv("BIFROST_OPENAI_BASE_URL", "http://localhost:8080/v1")
         self.BIFROST_API_KEY = os.getenv("BIFROST_API_KEY", "dummy-key")
         self.BIFROST_VIRTUAL_KEY = os.getenv("BIFROST_VIRTUAL_KEY", "")
+        self.BIFROST_API_KEY_AGENT_1 = os.getenv("BIFROST_API_KEY_AGENT_1", "")
+        self.BIFROST_API_KEY_AGENT_2 = os.getenv("BIFROST_API_KEY_AGENT_2", "")
 
         self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-5-mini")
         self.DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))
@@ -173,6 +175,7 @@ class Settings:
         self.LONG_TERM_MEMORY_EMBEDDER_MODEL = os.getenv("LONG_TERM_MEMORY_EMBEDDER_MODEL", "text-embedding-3-small")
         self.LONG_TERM_MEMORY_COLLECTION_NAME = os.getenv("LONG_TERM_MEMORY_COLLECTION_NAME", "longterm_memory")
         self.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS = os.getenv("LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS") or None
+
         # JWT Configuration
         self.JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
         self.JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")

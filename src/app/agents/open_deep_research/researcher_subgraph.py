@@ -53,7 +53,10 @@ from src.app.core.common.utils import get_today_str, execute_tools
 from src.app.core.llm.llm_utils import record_llm_error
 from src.app.core.middleware import invoke_model
 
-synthesizer_model = make_chat_model(COMPRESSION_MODEL).with_config(compress_model_config)
+synthesizer_model = make_chat_model(
+    COMPRESSION_MODEL,
+    bifrost_agent="agent_2",
+).with_config(compress_model_config)
 
 
 class ResearcherAgent:

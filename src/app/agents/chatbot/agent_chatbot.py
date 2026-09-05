@@ -44,6 +44,7 @@ chatbot_model = make_chat_model(
     model=f"openai:{settings.DEFAULT_LLM_MODEL}",
     api_key=settings.OPENAI_API_KEY,
     max_tokens=settings.MAX_TOKENS,
+    bifrost_agent="agent_1",
 )
 
 

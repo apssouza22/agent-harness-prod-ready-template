@@ -2,11 +2,17 @@
   "$schema": "https://www.getbifrost.ai/schema",
   "providers": {
     "openai": {
+      "network_config": {
+        "default_request_timeout_in_seconds": 120,
+        "max_retries": 3,
+        "retry_backoff_initial": 500,
+        "retry_backoff_max": 5000
+      },
       "keys": [
         {
           "name": "openai-key-1",
           "value": "env.OPENAI_API_KEY",
-          "models": [],
+          "models": ["*"],
           "weight": 1.0
         }
       ]
@@ -18,5 +24,98 @@
     "config": {
       "path": "./config.db"
     }
+  },
+  "client": {
+    "enforce_auth_on_inference": true
+  },
+  "governance": {
+    "virtual_keys": [
+      {
+        "id": "vk-agent-1",
+        "name": "agent-1",
+        "value": "sk-bf-agent-1-dev",
+        "description": "Virtual key for agent-1 (smaller agents)",
+        "is_active": true,
+        "provider_configs": [
+          {
+            "provider": "openai",
+            "weight": 0.7,
+            "allowed_models": ["gpt-5.6-luna", "gpt-4o-mini", "gpt-4o"],
+            "key_ids": ["*"]
+          }
+        ],
+        "rate_limit_id": "rate-limit-agent-1"
+      },
+      {
+        "id": "vk-agent-2",
+        "name": "agent-2",
+        "value": "sk-bf-agent-2-dev",
+        "description": "Virtual key for agent-2 (Harder tasks)",
+        "is_active": true,
+        "provider_configs": [
+          {
+            "provider": "openai",
+            "weight": 0.6,
+            "allowed_models": ["gpt-5.6-luna", "gpt-4o-mini"],
+            "key_ids": ["*"]
+          }
+        ],
+        "rate_limit_id": "rate-limit-agent-2"
+      }
+    ],
+    "budgets": [
+      {
+        "id": "budget-agent-1",
+        "virtual_key_id": "vk-agent-1",
+        "max_limit": 10.0,
+        "reset_duration": "1M",
+        "current_usage": 0.0,
+        "last_reset": "2026-08-01T00:00:00Z"
+      },
+      {
+        "id": "budget-agent-2",
+        "virtual_key_id": "vk-agent-2",
+        "max_limit": 5.0,
+        "reset_duration": "1M",
+        "current_usage": 0.0,
+        "last_reset": "2026-08-01T00:00:00Z"
+      }
+    ],
+    "rate_limits": [
+      {
+        "id": "rate-limit-agent-1",
+        "token_max_limit": 1000000,
+        "token_reset_duration": "1h",
+        "token_current_usage": 0,
+        "token_last_reset": "2026-08-01T00:00:00Z",
+        "request_max_limit": 100,
+        "request_reset_duration": "1m",
+        "request_current_usage": 0,
+        "request_last_reset": "2026-08-01T00:00:00Z"
+      },
+      {
+        "id": "rate-limit-agent-2",
+        "token_max_limit": 500000,
+        "token_reset_duration": "1h",
+        "token_current_usage": 0,
+        "token_last_reset": "2026-08-01T00:00:00Z",
+        "request_max_limit": 50,
+        "request_reset_duration": "1m",
+        "request_current_usage": 0,
+        "request_last_reset": "2026-08-01T00:00:00Z"
+      }
+    ]
+  },
+  "mcp": {
+    "client_configs": [
+      {
+        "name": "deepwiki",
+        "connection_type": "http",
+        "connection_string": "https://mcp.deepwiki.com/mcp",
+        "auth_type": "none",
+        "is_ping_available": true,
+        "tools_to_execute": ["*"]
+      }
+    ]
   }
 }
