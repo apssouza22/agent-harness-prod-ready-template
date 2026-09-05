@@ -1,21 +1,28 @@
 {
   "version": 1,
   "hooks": {
+    "preToolUse": [
+      {
+        "command": "python3 .cursor/hooks/block-env-access.py",
+        "matcher": "Read|Grep|Glob|Shell",
+        "failClosed": true
+      }
+    ],
     "beforeReadFile": [
       {
-        "command": ".cursor/hooks/block-env-files.sh",
+        "command": "python3 .cursor/hooks/block-env-access.py",
         "failClosed": true
       }
     ],
     "beforeTabFileRead": [
       {
-        "command": ".cursor/hooks/block-env-files.sh",
+        "command": "python3 .cursor/hooks/block-env-access.py",
         "failClosed": true
       }
     ],
     "beforeShellExecution": [
       {
-        "command": ".cursor/hooks/block-env-shell.sh",
+        "command": "python3 .cursor/hooks/block-env-access.py",
         "matcher": "\\.env",
         "failClosed": true
       }
