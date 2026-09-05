@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeReadFile": [
+      {
+        "command": ".cursor/hooks/block-env-files.sh",
+        "failClosed": true
+      }
+    ],
+    "beforeTabFileRead": [
+      {
+        "command": ".cursor/hooks/block-env-files.sh",
+        "failClosed": true
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/block-env-shell.sh",
+        "matcher": "\\.env",
+        "failClosed": true
+      }
+    ]
+  }
+}
