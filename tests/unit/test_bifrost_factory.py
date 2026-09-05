@@ -1,6 +1,9 @@
 """Unit tests for Bifrost LLM factory helpers."""
 
+from unittest.mock import MagicMock
+
 import pytest
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.app.core.common import config as config_module
 from src.app.core.llm import factory
@@ -63,7 +66,34 @@ def test_resolve_api_key_for_model_uses_bifrost_key(bifrost_settings):
     assert factory.resolve_api_key_for_model("openai:gpt-4o-mini") == "test-dummy-key"
 
 
-def test_create_chat_model_uses_bifrost_base_url(bifrost_settings):
-    model = factory.create_chat_model("openai:gpt-4o-mini", max_tokens=50)
+def test_make_chat_model_uses_bifrost_base_url(bifrost_settings):
+    model = factory.make_chat_model("openai:gpt-4o-mini", max_tokens=50)
 
     assert str(model.root_client.base_url).rstrip("/") == "http://bifrost:8080/langchain"
+
+
+def test_make_chat_model_with_fallbacks(direct_settings, monkeypatch):
+    primary = MagicMock(spec=BaseChatModel)
+    fallback = MagicMock(spec=BaseChatModel)
+    with_fallbacks_result = MagicMock(spec=BaseChatModel)
+
+    primary.with_fallbacks.return_value = with_fallbacks_result
+
+    def fake_init_chat_model(**kwargs):
+        model_name = kwargs.get("model")
+        if model_name == "openai:gpt-4o-mini":
+            return primary
+        if model_name == "openai:gpt-4o":
+            return fallback
+        raise AssertionError(f"unexpected model: {model_name}")
+
+    monkeypatch.setattr(factory, "init_chat_model", fake_init_chat_model)
+
+    result = factory.make_chat_model(
+        "openai:gpt-4o-mini",
+        fallbacks=["openai:gpt-4o"],
+        max_tokens=50,
+    )
+
+    primary.with_fallbacks.assert_called_once_with([fallback])
+    assert result is with_fallbacks_result

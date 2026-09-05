@@ -6,7 +6,7 @@ using a supervisor-researcher architecture with LangGraph subgraphs.
 
 from src.app.agents.tools.search_tool import SearchAPI
 from src.app.core.common.utils import get_api_key_for_model
-from src.app.core.llm.factory import create_configurable_chat_model
+from src.app.core.llm.factory import make_chat_model
 
 # ──────────────────────────────────────
 # Deep Research Agent Configuration
@@ -39,7 +39,8 @@ FINAL_REPORT_MODEL_MAX_TOKENS = 10000
 MAX_CONTENT_LENGTH = 50000
 
 # Shared configurable model used across all subgraphs
-configurable_model = create_configurable_chat_model(
+configurable_model = make_chat_model(
+    RESEARCH_MODEL,
     configurable_fields=("model", "max_tokens", "api_key"),
 )
 

@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_openai import ChatOpenAI
 
 from src.app.core.common.config import Settings, settings as default_settings
 from src.app.core.common.logging import logger
@@ -85,34 +84,45 @@ def build_chat_model_kwargs(app_settings: Settings | None = None, **overrides: A
     return kwargs
 
 
-def create_chat_model(
+def make_chat_model(
     model: str,
+    fallbacks: list[str] | None = None,
     *,
-    configurable_fields: Literal["any"] | list[str] | tuple[str, ...] | None = None,
     app_settings: Settings | None = None,
+    configurable_fields: Literal["any"] | list[str] | tuple[str, ...] | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
-    """Create a LangChain chat model, routing through Bifrost when enabled."""
+    """Create a LangChain chat model with optional fallbacks.
+
+    Instantiates the correct provider model based on the ``model`` identifier
+    (e.g. ``openai:gpt-4o``, ``anthropic:claude-3-5-sonnet``). When ``fallbacks``
+    are provided, each fallback model is instantiated with the same kwargs and
+    attached via ``with_fallbacks``.
+
+    Args:
+        model: Provider-prefixed model identifier passed to ``init_chat_model``.
+        fallbacks: Optional list of fallback model identifiers.
+        app_settings: Optional settings override for Bifrost routing and API keys.
+        configurable_fields: Optional fields to make runtime-configurable.
+        **kwargs: Additional kwargs forwarded to ``init_chat_model``.
+
+    Returns:
+        A configured LangChain chat model, optionally wrapped with fallbacks.
+    """
     model_kwargs = build_chat_model_kwargs(app_settings, model=model, **kwargs)
     if configurable_fields is not None:
-        return init_chat_model(configurable_fields=configurable_fields, **model_kwargs)
-    return init_chat_model(**model_kwargs)
+        chat_model = init_chat_model(configurable_fields=configurable_fields, **model_kwargs)
+    else:
+        chat_model = init_chat_model(**model_kwargs)
 
+    if not fallbacks:
+        return chat_model
 
-def create_configurable_chat_model(
-    configurable_fields: Literal["any"] | list[str] | tuple[str, ...] = ("model", "max_tokens", "api_key"),
-    app_settings: Settings | None = None,
-    **kwargs: Any,
-) -> BaseChatModel:
-    """Create a configurable chat model with Bifrost defaults applied."""
-    model_kwargs = build_chat_model_kwargs(app_settings, **kwargs)
-    return init_chat_model(configurable_fields=configurable_fields, **model_kwargs)
-
-
-def create_openai_chat_model(app_settings: Settings | None = None, **kwargs: Any) -> ChatOpenAI:
-    """Create a ChatOpenAI instance, routing through Bifrost when enabled."""
-    model_kwargs = build_chat_model_kwargs(app_settings, **kwargs)
-    return ChatOpenAI(**model_kwargs)
+    fallback_models = [
+        make_chat_model(fallback_model, app_settings=app_settings, **kwargs)
+        for fallback_model in fallbacks
+    ]
+    return chat_model.with_fallbacks(fallback_models)
 
 
 def build_openai_client_kwargs(app_settings: Settings | None = None, **overrides: Any) -> dict[str, Any]:
@@ -141,37 +151,3 @@ def build_mem0_openai_config(app_settings: Settings | None = None) -> dict[str, 
         config["api_key"] = resolved_settings.BIFROST_API_KEY
         config["openai_base_url"] = get_bifrost_openai_base_url(resolved_settings)
     return config
-
-
-def make_chat_model(
-    model: str,
-    *,
-    configurable_fields: Literal["any"] | list[str] | tuple[str, ...] | None = None,
-    app_settings: Settings | None = None,
-    **kwargs: Any,
-) -> BaseChatModel:
-    """Factory for LangChain chat models with optional settings injection."""
-    return create_chat_model(
-        model,
-        configurable_fields=configurable_fields,
-        app_settings=app_settings,
-        **kwargs,
-    )
-
-
-def make_configurable_chat_model(
-    configurable_fields: Literal["any"] | list[str] | tuple[str, ...] = ("model", "max_tokens", "api_key"),
-    app_settings: Settings | None = None,
-    **kwargs: Any,
-) -> BaseChatModel:
-    """Factory for configurable LangChain chat models."""
-    return create_configurable_chat_model(
-        configurable_fields=configurable_fields,
-        app_settings=app_settings,
-        **kwargs,
-    )
-
-
-def make_openai_chat_model(app_settings: Settings | None = None, **kwargs: Any) -> ChatOpenAI:
-    """Factory for OpenAI-compatible chat models."""
-    return create_openai_chat_model(app_settings=app_settings, **kwargs)

@@ -37,10 +37,10 @@ from src.app.core.mcp.mcp_utils import handle_mcp_tool_call
 from src.app.core.mcp.session_manager import get_mcp_session_manager
 from src.app.core.memory import memory_service
 
-from src.app.core.llm.factory import create_chat_model
+from src.app.core.llm.factory import make_chat_model
 
 
-chatbot_model = create_chat_model(
+chatbot_model = make_chat_model(
     model=f"openai:{settings.DEFAULT_LLM_MODEL}",
     api_key=settings.OPENAI_API_KEY,
     max_tokens=settings.MAX_TOKENS,
