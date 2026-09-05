@@ -29,3 +29,4 @@ logs/
 large_tool_results/
 conversation_summaries/
 /.agent/plans/
+/observability/bifrost/data/

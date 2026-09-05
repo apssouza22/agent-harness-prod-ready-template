@@ -153,7 +153,8 @@ class Settings:
         self.BIFROST_API_KEY_AGENT_1 = os.getenv("BIFROST_API_KEY_AGENT_1", "")
         self.BIFROST_API_KEY_AGENT_2 = os.getenv("BIFROST_API_KEY_AGENT_2", "")
 
-        self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-5-mini")
+        self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-5.6-luna")
+        self.DEFAULT_LLM_REASONING_EFFORT = os.getenv("DEFAULT_LLM_REASONING_EFFORT", "low")
         self.DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))
         self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))
         self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "3"))

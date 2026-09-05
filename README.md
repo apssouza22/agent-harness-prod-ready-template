@@ -175,7 +175,8 @@ Key variables:
 |----------|----------|---------|
 | App | `APP_ENV` | `development` |
 | LLM | `OPENAI_API_KEY` | -- |
-| LLM | `DEFAULT_LLM_MODEL` | `gpt-5-mini` |
+| LLM | `DEFAULT_LLM_MODEL` | `gpt-5.6-luna` |
+| LLM | `DEFAULT_LLM_REASONING_EFFORT` | `low` |
 | LLM | `MAX_TOKENS` | `2000` |
 | Memory | `LONG_TERM_MEMORY_MODEL` | `gpt-5-nano` |
 | Memory | `LONG_TERM_MEMORY_EMBEDDER_MODEL` | `text-embedding-3-small` |

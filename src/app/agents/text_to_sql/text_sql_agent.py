@@ -67,10 +67,10 @@ class TextSQLDeepAgent:
             metadata={
                 "query": query,
                 "user_id": user_id,
-                "model_name": "gpt-5-mini",
+                "model_name": settings.DEFAULT_LLM_MODEL,
                 "trace_metadata": {
                     "service": "text_to_sql",
-                    "model": "gpt-5-mini",
+                    "model": settings.DEFAULT_LLM_MODEL,
                 },
             },
         )
@@ -101,8 +101,8 @@ def create_sql_deep_agent():
     db = SQLDatabase.from_uri(f"sqlite:///{db_path}", sample_rows_in_table_info=3)
 
     model = make_chat_model(
-        "openai:gpt-5-mini",
-        reasoning={"effort": "medium"},
+        f"openai:{settings.DEFAULT_LLM_MODEL}",
+        reasoning={"effort": settings.DEFAULT_LLM_REASONING_EFFORT},
         temperature=0,
         bifrost_agent="agent_1",
     )
