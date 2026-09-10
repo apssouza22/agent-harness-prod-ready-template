@@ -32,7 +32,7 @@ from src.app.core.memory.factory import make_memory_service
 from src.app.core.langfuse.factory import make_langfuse_tracer
 from src.app.core.session.factory import make_session_repository
 from src.app.core.user.factory import make_user_repository
-from src.app.init import mcp_dependencies_cleanup, mcp_dependencies_init
+from src.app.core.mcp.dependencies import mcp_dependencies_cleanup, mcp_dependencies_init
 
 load_dotenv()
 

@@ -1,4 +1,4 @@
-"""Application bootstrap helpers for MCP lifecycle."""
+"""MCP lifecycle dependency helpers."""
 
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
