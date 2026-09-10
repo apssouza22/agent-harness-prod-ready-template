@@ -7,7 +7,7 @@ from langchain_core.messages import ToolMessage
 
 from src.app.core.common.logging import bind_context, logger
 from src.app.core.context import truncate_tool_call_if_too_long
-from src.app.core.mcp.session_manager import generate_correlation_id, get_mcp_session_manager
+from src.app.core.mcp.manager import McpManager, generate_correlation_id
 from src.app.core.metrics.metrics import tool_executions_total
 
 
@@ -15,6 +15,7 @@ async def handle_mcp_tool_call(
     tool_fn: Callable,
     tool_call: dict[str, Any],
     tool_name: str,
+    mcp_manager: McpManager,
     max_retries: int = 1,
     on_reconnect: Optional[Callable] = None,
     correlation_id: Optional[str] = None,
@@ -27,6 +28,7 @@ async def handle_mcp_tool_call(
             - "args": Arguments to pass to the tool
             - "id": Tool call ID
         tool_name: Name of the tool being called.
+        mcp_manager: Initialized MCP manager used for reconnection.
         max_retries: Maximum number of reconnection attempts. Defaults to 1.
         on_reconnect: Optional callback to execute after successful reconnection
             (e.g., to reload tools).
@@ -35,11 +37,9 @@ async def handle_mcp_tool_call(
     Returns:
         ToolMessage: A ToolMessage containing either the tool result or error information.
     """
-    # Generate correlation ID if not provided
     if correlation_id is None:
         correlation_id = generate_correlation_id()
 
-    # Bind correlation ID to logging context
     bind_context(mcp_tool_correlation_id=correlation_id, mcp_tool_name=tool_name)
 
     logger.info(
@@ -67,7 +67,6 @@ async def handle_mcp_tool_call(
             ))
 
         except Exception as tool_error:
-            # Check if it's a ClosedResourceError and we can retry
             if isinstance(tool_error, ClosedResourceError) and attempt < max_retries:
                 logger.warning(
                     "mcp_connection_closed_retrying",
@@ -78,9 +77,7 @@ async def handle_mcp_tool_call(
                     error=str(tool_error),
                 )
 
-                # Attempt to reconnect MCP sessions
                 try:
-                    mcp_manager = get_mcp_session_manager()
                     reconnected = await mcp_manager.reconnect()
                     if reconnected:
                         logger.info(
@@ -88,23 +85,18 @@ async def handle_mcp_tool_call(
                             correlation_id=correlation_id,
                             tool_name=tool_name,
                         )
-                        # Call the reconnection callback if provided
                         if on_reconnect:
                             await on_reconnect()
-                        continue  # Retry the tool call
-                except Exception as reconnect_error:
-                    logger.error(
+                        continue
+                except Exception:
+                    logger.exception(
                         "mcp_reconnection_failed",
                         correlation_id=correlation_id,
-                        error=str(reconnect_error),
                     )
 
-            # Either not a ClosedResourceError, out of retries, or reconnection failed
-            logger.error(
+            logger.exception(
                 "mcp_tool_call_failed",
                 correlation_id=correlation_id,
-                error=str(tool_error),
-                error_type=type(tool_error).__name__,
                 tool_name=tool_name,
                 tool_call_id=tool_call["id"],
                 attempt=attempt + 1,

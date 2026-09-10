@@ -21,4 +21,5 @@ def get_greeting(name: str) -> str:
 
 
 if __name__ == "__main__":
-    mcpServer.run(transport="sse")
+    # Streamable HTTP is the modern default; use transport="sse" for legacy servers.
+    mcpServer.run(transport="streamable-http")

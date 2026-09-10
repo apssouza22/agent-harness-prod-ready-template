@@ -225,6 +225,9 @@ class Settings:
         self.MCP_HOSTNAMES = [
             h.strip() for h in os.getenv("MCP_HOSTNAMES_CSV", "").split(",") if h.strip()
         ]
+        self.MCP_ENDPOINT_PATH = os.getenv("MCP_ENDPOINT_PATH", "/mcp")
+        self.MCP_PROTOCOL_MODE = os.getenv("MCP_PROTOCOL_MODE", "auto")
+        self.MCP_TOOL_CACHE_MODE = os.getenv("MCP_TOOL_CACHE_MODE", "use")
 
 
         # Rate Limiting Configuration

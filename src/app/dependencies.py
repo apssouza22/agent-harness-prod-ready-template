@@ -19,6 +19,7 @@ from src.app.core.common.logging import bind_context, logger
 from src.app.core.db.database import DatabaseFactory
 from src.app.core.langfuse.client import LangfuseTracer
 from src.app.core.memory.memory import MemoryService
+from src.app.core.mcp.manager import McpManager
 from src.app.core.session.session_model import Session as ChatSession
 from src.app.core.session.session_repository import SessionRepository
 from src.app.core.user.user_model import User
@@ -72,6 +73,10 @@ def get_cache_client(request: Request) -> CacheClient | None:
     return getattr(request.app.state, "cache_client", None)
 
 
+def get_mcp_manager(request: Request) -> McpManager:
+    return request.app.state.mcp_manager
+
+
 def get_chatbot_agent(request: Request) -> AgentChatbot:
     return request.app.state.chatbot_agent
 
@@ -93,6 +98,7 @@ MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]
 CheckpointServiceDep = Annotated[CheckpointService, Depends(get_checkpoint_service)]
 LangfuseDep = Annotated[LangfuseTracer, Depends(get_langfuse_tracer)]
 CacheDep = Annotated[CacheClient | None, Depends(get_cache_client)]
+McpManagerDep = Annotated[McpManager, Depends(get_mcp_manager)]
 ChatbotAgentDep = Annotated[AgentChatbot, Depends(get_chatbot_agent)]
 DeepResearchAgentDep = Annotated[DeepResearchAgent, Depends(get_deep_research_agent)]
 TextToSqlAgentDep = Annotated[TextSQLDeepAgent, Depends(get_text_to_sql_agent)]

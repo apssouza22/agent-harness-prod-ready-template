@@ -55,7 +55,7 @@ src/
 │       ├── context/         # Context overflow prevention (+ summarization/trim middleware)
 │       ├── memory/          # Long-term memory (mem0) (+ MemoryMiddleware)
 │       ├── checkpoint/      # State persistence
-│       ├── mcp/             # Model Context Protocol
+│       ├── mcp/             # MCP manager, factory, shared HTTP pool, tool helpers
 │       ├── metrics/         # Prometheus definitions (+ LlmMetricsMiddleware)
 │       ├── llm/             # LLM factory (Bifrost routing) and utilities
 │       ├── db/              # Database connections
@@ -927,62 +927,120 @@ async def chat_stream(request, chat_request, session=Depends(get_current_session
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 ```
 
-Startup uses a lifespan context (MCP init/cleanup, logging), not scattered `@app.on_event` hooks:
+Startup uses a lifespan context to wire dependencies onto `app.state`, including MCP init **before** the chatbot compiles (so MCP tools are available on first graph build):
 
 ```python
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("application_startup", project_name=settings.PROJECT_NAME, version=settings.VERSION)
-    await mcp_dependencies_init()
-    yield
-    await mcp_dependencies_cleanup()
-    logger.info("application_shutdown")
+    # ... database, checkpoint, memory, etc.
 
-app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)
-setup_metrics(app)
-setup_rate_limit(app)
-app.add_middleware(LoggingContextMiddleware)
-app.add_middleware(MetricsMiddleware)
+    mcp_manager = make_mcp_manager()
+    app.state.mcp_manager = mcp_manager
+    await initialize_mcp_manager(mcp_manager)
+
+    app.state.chatbot_agent = await make_chatbot_agent(
+        checkpointer,
+        langfuse_tracer=langfuse_tracer,
+        mcp_manager=mcp_manager,
+    )
+
+    yield
+
+    await cleanup_mcp_manager(mcp_manager)
+    # ... pool reset, tracer shutdown, database dispose
 ```
+
+Routes resolve the manager through FastAPI dependencies (`McpManagerDep`) the same way they resolve `MemoryServiceDep` or `CheckpointServiceDep`.
 
 ---
 
 ## 11. MCP (Model Context Protocol)
 
-Tools can come from MCP servers. Sessions spin up at app start and live for the process lifetime so you are not handshaking per request.
+Tools can come from external MCP servers. The harness uses LangChain's [`MCPAdapter`](https://docs.langchain.com/oss/python/langchain/mcp/connections) with FastMCP's `ClientGroup` — the production pattern for multi-server deployments with shared HTTP pooling, tool-list caching, and per-call reentrant tool execution.
+
+### Wiring and dependency injection
+
+`McpManager` is created by a factory, initialized at startup, stored on `app.state`, and injected into agents that need external tools:
 
 ```python
-class MCPSessionManager:
-    async def initialize(self) -> Resource:
-        self._exit_stack = AsyncExitStack()
-        await self._exit_stack.__aenter__()
+# src/app/main.py (lifespan excerpt)
+mcp_manager = make_mcp_manager()
+app.state.mcp_manager = mcp_manager
+await initialize_mcp_manager(mcp_manager)
 
-        tools, sessions = [], []
-        for hostname in settings.MCP_HOSTNAMES:
-            session = await self._exit_stack.enter_async_context(
-                mcp_sse_client(hostname, correlation_id=generate_correlation_id())
-            )
-            session_tools = await load_mcp_tools(session)
-            tools.extend(session_tools)
-            sessions.append(session)
-
-        self._resource = Resource(tools=tools, sessions=sessions)
-        return self._resource
+app.state.chatbot_agent = await make_chatbot_agent(
+    checkpointer,
+    langfuse_tracer=langfuse_tracer,
+    mcp_manager=mcp_manager,
+)
 ```
 
-Operational notes:
-
-- Multiple hosts from `MCP_HOSTNAMES_CSV`
-- Reconnect with backoff on `ClosedResourceError`
-- If MCP is down, the chatbot still runs on built-in tools (degraded, not dead)
-- Correlation IDs on MCP calls so traces line up with logs
-
-MCP tools are loaded once and merged with built-in tools when the graph is compiled:
+The chatbot holds the manager and loads discovered tools when the graph compiles:
 
 ```python
+# src/app/agents/chatbot/agent_chatbot.py
+async def _load_mcp_tools(self):
+    if settings.MCP_ENABLED and self._mcp_manager is not None:
+        resource = self._mcp_manager.get_resource()
+        mcp_tools = resource.tools
+    self.mcp_tools_by_name = {tool.name: tool for tool in mcp_tools}
+
 def _get_all_tools(self) -> list[BaseTool]:
     return self.tools + list(self.mcp_tools_by_name.values())
 ```
+
+Tool calls go through `handle_mcp_tool_call`, which receives the injected manager for reconnection — no global singleton lookup.
+
+### Connection lifecycle
+
+`McpManager` connects to each configured host, discovers tools once, and keeps client connections open for the process lifetime:
+
+```python
+class McpManager:
+    async def initialize(self, *, cache_mode: CacheMode | None = None) -> Resource:
+        self._exit_stack = AsyncExitStack()
+        await self._exit_stack.__aenter__()
+
+        connected_clients: dict[str, Client] = {}
+        for index, hostname in enumerate(settings.MCP_HOSTNAMES):
+            server_url = normalize_mcp_server_url(hostname, default_path=settings.MCP_ENDPOINT_PATH)
+            try:
+                client = _build_client(server_url)
+                await self._exit_stack.enter_async_context(client)
+                connected_clients[server_name_from_url(server_url, index)] = client
+            except Exception:
+                logger.exception("failed_to_connect_to_mcp_server", hostname=hostname)
+
+        if connected_clients:
+            client_group = ClientGroup(connected_clients)
+            adapter = MCPAdapter(client_group)
+            tools = await adapter.list_tools(cache_mode=discovery_mode)
+
+        self._resource = Resource(tools=tools, server_count=len(connected_clients))
+        return self._resource
+```
+
+Key design choices aligned with LangChain's MCP connection guide:
+
+| Pattern | Implementation |
+|---|---|
+| Multi-server fleet | `ClientGroup` with one FastMCP `Client` per host; tool names are namespaced by server |
+| Shared HTTP pool | `connection_pool.py` — one `httpx2` transport shared across all MCP clients |
+| Tool discovery cache | `MCP_TOOL_CACHE_MODE` (`use`, `refresh`, `bypass`) passed to `adapter.list_tools()` |
+| Protocol negotiation | `MCP_PROTOCOL_MODE` (`auto` or `legacy`) per client |
+| Reentrant tool calls | LangChain tools wrap each invocation in `async with client`; FastMCP reference-counts the session |
+| Partial fleet failure | Each host connects independently; unreachable servers are skipped, not fatal |
+
+Individual tool invocations do not pin idle sessions between calls. LangChain's adapted tools enter the client scope on every `ainvoke` and release it when the call returns; the manager keeps baseline connections warm for concurrent requests.
+
+### Operational notes
+
+- Multiple hosts from `MCP_HOSTNAMES_CSV` (bare hosts like `mcp:7001` are normalized to `http://mcp:7001/mcp`)
+- `MCP_ENDPOINT_PATH` defaults to `/mcp` (streamable HTTP); set `/sse` for legacy SSE servers
+- Reconnect with tool catalog refresh on `ClosedResourceError` during tool execution
+- If MCP is down, the chatbot still runs on built-in tools (degraded, not dead)
+- Correlation IDs on MCP calls so traces line up with logs
+- Sample server at `src/mcp/server.py` uses streamable HTTP: `python src/mcp/server.py`
 
 ---
 
@@ -1336,7 +1394,7 @@ my_model = create_chat_model(model=f"openai:{settings.DEFAULT_LLM_MODEL}")
 | Streaming | SSE token stream |
 | Evaluation | Judge over Langfuse traces, markdown metrics |
 | Deployment | Docker non-root, Compose stack (Postgres, Bifrost, Prometheus, Grafana) |
-| MCP | Multi-host, reconnect, built-in fallback |
+| MCP | `McpManager` DI, `MCPAdapter` + `ClientGroup`, shared pool, tool cache, multi-host fallback |
 | Agent shapes | Custom graph, nested supervisors, Deep Agents |
 
 The hard part of production is rarely the clever prompt. It is auth, safety, memory, checkpoints, observability, and failure modes. A harness lets you solve that once and keep agent code focused on behavior: a tight chat loop, a research fan-out, or a SQL ReAct agent can all sit on the same bones.

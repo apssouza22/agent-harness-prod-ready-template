@@ -32,7 +32,8 @@ from src.app.core.memory.factory import make_memory_service
 from src.app.core.langfuse.factory import make_langfuse_tracer
 from src.app.core.session.factory import make_session_repository
 from src.app.core.user.factory import make_user_repository
-from src.app.core.mcp.dependencies import mcp_dependencies_cleanup, mcp_dependencies_init
+from src.app.core.mcp.dependencies import cleanup_mcp_manager, initialize_mcp_manager
+from src.app.core.mcp.factory import make_mcp_manager
 
 load_dotenv()
 
@@ -64,7 +65,15 @@ async def lifespan(app: FastAPI):
     checkpointer = await checkpoint_service.get_checkpointer()
     app.state.checkpointer = checkpointer
 
-    app.state.chatbot_agent = await make_chatbot_agent(checkpointer, langfuse_tracer=langfuse_tracer)
+    mcp_manager = make_mcp_manager()
+    app.state.mcp_manager = mcp_manager
+    await initialize_mcp_manager(mcp_manager)
+
+    app.state.chatbot_agent = await make_chatbot_agent(
+        checkpointer,
+        langfuse_tracer=langfuse_tracer,
+        mcp_manager=mcp_manager,
+    )
     app.state.deep_research_agent = await make_deep_research_agent(checkpointer, langfuse_tracer=langfuse_tracer)
     app.state.text_to_sql_agent = await make_text_to_sql_agent(langfuse_tracer=langfuse_tracer)
 
@@ -75,11 +84,9 @@ async def lifespan(app: FastAPI):
         api_prefix=settings.API_V1_STR,
     )
 
-    await mcp_dependencies_init()
-
     yield
 
-    await mcp_dependencies_cleanup()
+    await cleanup_mcp_manager(mcp_manager)
     await reset_connection_pool()
     langfuse_tracer.shutdown()
     database.dispose()

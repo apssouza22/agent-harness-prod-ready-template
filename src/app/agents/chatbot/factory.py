@@ -11,6 +11,7 @@ from src.app.agents.chatbot.agent_chatbot import (
 from src.app.agents.tools import tools
 from src.app.core.common.config import settings
 from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
+from src.app.core.mcp.manager import McpManager
 from src.app.core.context import SummarizationMiddleware, TrimLongMessagesMiddleware
 from src.app.core.guardrails import GuardrailMiddleware
 from src.app.core.memory import MemoryMiddleware
@@ -21,12 +22,14 @@ from src.app.core.middleware import ErrorHandlingMiddleware, LoggingMiddleware
 async def make_chatbot_agent(
     checkpointer: AsyncPostgresSaver | None,
     langfuse_tracer: LangfuseTracer | None = None,
+    mcp_manager: McpManager | None = None,
 ) -> AgentChatbot:
     """Create and compile a chatbot agent.
 
     Args:
         checkpointer: LangGraph async Postgres checkpointer, or None.
         langfuse_tracer: Optional Langfuse tracer for observability.
+        mcp_manager: Optional MCP manager for external tool discovery and calls.
 
     Returns:
         AgentChatbot: Compiled chatbot agent instance.
@@ -53,6 +56,12 @@ async def make_chatbot_agent(
             max_tokens=settings.MAX_TOKENS,
         ),
     ]
-    agent = AgentChatbot("Chatbot", tools, checkpointer, middlewares=middlewares)
+    agent = AgentChatbot(
+        "Chatbot",
+        tools,
+        checkpointer,
+        middlewares=middlewares,
+        mcp_manager=mcp_manager,
+    )
     await agent.compile()
     return agent

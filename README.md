@@ -189,6 +189,9 @@ Key variables:
 | Database | `POSTGRES_PORT` | `5432` |
 | MCP | `MCP_ENABLED` | `true` |
 | MCP | `MCP_HOSTNAMES_CSV` | -- |
+| MCP | `MCP_ENDPOINT_PATH` | `/mcp` |
+| MCP | `MCP_PROTOCOL_MODE` | `auto` |
+| MCP | `MCP_TOOL_CACHE_MODE` | `use` |
 | Rate Limit | `RATE_LIMIT_DEFAULT` | `200/day, 50/hour` |
 
 See `.env.example` for the complete list.
@@ -202,13 +205,18 @@ Powered by mem0ai with pgvector. Memories are stored per user and retrieved by s
 
 ### Model Context Protocol (MCP)
 
-MCP sessions are initialized at application startup and persist for the application lifetime. Features:
-- Multi-server support via `MCP_HOSTNAMES_CSV`
-- Automatic reconnection on `ClosedResourceError` with configurable retries
+MCP uses LangChain's `MCPAdapter` with FastMCP `ClientGroup` for production deployments. Features:
+- Multi-server support via `MCP_HOSTNAMES_CSV` with independent connections per server
+- Shared HTTP connection pool across MCP clients for concurrent requests
+- Tool discovery caching via `MCP_TOOL_CACHE_MODE` (`use`, `refresh`, `bypass`)
+- Per-server protocol negotiation via `MCP_PROTOCOL_MODE` (`auto` or `legacy`)
+- Automatic reconnection with tool catalog refresh on connection failures
 - Graceful degradation: the app continues with built-in tools if MCP servers are unavailable
-- Includes a sample MCP server (`src/mcp/server.py`)
+- Includes a sample MCP server (`src/mcp/server.py`) using streamable HTTP
 
 Start MCP server: `python src/mcp/server.py`
+
+For legacy SSE servers, set `MCP_ENDPOINT_PATH=/sse` and run the sample server with `transport="sse"`.
 
 ### Structured Logging
 

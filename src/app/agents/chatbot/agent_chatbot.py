@@ -33,8 +33,8 @@ from src.app.core.fault_tolerance import (
     get_tool_timeout_policy,
 )
 from src.app.core.context import truncate_tool_call_if_too_long
+from src.app.core.mcp.manager import McpManager
 from src.app.core.mcp.mcp_utils import handle_mcp_tool_call
-from src.app.core.mcp.session_manager import get_mcp_session_manager
 from src.app.core.memory import memory_service
 
 from src.app.core.llm.factory import make_chat_model
@@ -80,12 +80,14 @@ class AgentChatbot:
         tools: list[BaseTool],
         checkpointer: AsyncPostgresSaver,
         middlewares: Sequence[AgentMiddleware],
+        mcp_manager: McpManager | None = None,
     ):
         self.name = name
         self.checkpointer = checkpointer
         self.tools = tools
         self.tools_by_name = {tool.name: tool for tool in tools}
         self.mcp_tools_by_name: dict[str, BaseTool] = {}
+        self._mcp_manager = mcp_manager
         self._graph: Optional[StateGraphCompiled] = None
         self._last_trace_id: Optional[str] = None
         self._pipeline = AgentPipeline(
@@ -225,10 +227,9 @@ class AgentChatbot:
         """Load tools from persistent MCP sessions."""
         mcp_tools = []
 
-        if settings.MCP_ENABLED:
+        if settings.MCP_ENABLED and self._mcp_manager is not None:
             try:
-                mcp_manager = get_mcp_session_manager()
-                resource = mcp_manager.get_resource()
+                resource = self._mcp_manager.get_resource()
                 mcp_tools = resource.tools
                 logger.info("mcp_tools_loaded", tool_count=len(mcp_tools))
             except RuntimeError as e:
@@ -282,6 +283,7 @@ class AgentChatbot:
                         tool_fn=tool_fn,
                         tool_call=tool_call,
                         tool_name=tool_name,
+                        mcp_manager=self._mcp_manager,
                         max_retries=1,
                         on_reconnect=self._load_mcp_tools,
                     )
