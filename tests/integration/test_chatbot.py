@@ -137,3 +137,66 @@ class TestClearMessages:
     async def test_clear_messages_no_auth(self, client: AsyncClient):
         response = await client.delete("/api/v1/chatbot/messages")
         assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /chatbot/checkpoints
+# ---------------------------------------------------------------------------
+
+class TestListCheckpoints:
+    async def test_list_checkpoints_success(self, client: AsyncClient, auth_headers: dict):
+        response = await client.get(
+            "/api/v1/chatbot/checkpoints",
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "checkpoints" in data
+        assert len(data["checkpoints"]) == 1
+        assert data["checkpoints"][0]["checkpoint_id"] == "cp-1"
+
+    async def test_list_checkpoints_no_auth(self, client: AsyncClient):
+        response = await client.get("/api/v1/chatbot/checkpoints")
+        assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /chatbot/checkpoints/{checkpoint_id}
+# ---------------------------------------------------------------------------
+
+class TestGetCheckpoint:
+    async def test_get_checkpoint_success(self, client: AsyncClient, auth_headers: dict):
+        response = await client.get(
+            "/api/v1/chatbot/checkpoints/cp-1",
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["checkpoint"]["checkpoint_id"] == "cp-1"
+        assert data["checkpoint"]["updated_channels"] == ["messages"]
+
+    async def test_get_checkpoint_no_auth(self, client: AsyncClient):
+        response = await client.get("/api/v1/chatbot/checkpoints/cp-1")
+        assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /chatbot/state/history
+# ---------------------------------------------------------------------------
+
+class TestStateHistory:
+    async def test_get_state_history_success(self, client: AsyncClient, auth_headers: dict):
+        response = await client.get(
+            "/api/v1/chatbot/state/history",
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "history" in data
+        assert len(data["history"]) == 1
+        assert data["history"][0]["checkpoint_id"] == "cp-1"
+        assert data["history"][0]["next"] == ["chat"]
+
+    async def test_get_state_history_no_auth(self, client: AsyncClient):
+        response = await client.get("/api/v1/chatbot/state/history")
+        assert response.status_code == 401

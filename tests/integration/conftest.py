@@ -52,6 +52,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlmodel import Session, SQLModel
 
 from src.app import dependencies
+from src.app.core.checkpoint.models import CheckpointDetail, CheckpointSummary, StateHistoryEntry
 from src.app.core.common.model.message import Message
 from src.app.core.db.factory import make_database_cached
 from src.app.main import app as _app
@@ -78,6 +79,7 @@ def _make_mock_chatbot_agent():
             Message(role="assistant", content="Hello!"),
         ]
     )
+    agent.graph = MagicMock()
     agent.last_trace_id = "trace-chatbot-1"
     return agent
 
@@ -133,6 +135,45 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
     mock_checkpoint_service = AsyncMock()
     mock_checkpoint_service.get_checkpointer = AsyncMock(return_value=None)
     mock_checkpoint_service.clear_session = AsyncMock()
+    mock_checkpoint_service.list_checkpoints = AsyncMock(
+        return_value=[
+            CheckpointSummary(
+                checkpoint_id="cp-1",
+                thread_id="session-1",
+                parent_checkpoint_id=None,
+                created_at="2026-01-01T00:00:00Z",
+                source="loop",
+                step=1,
+            )
+        ]
+    )
+    mock_checkpoint_service.get_checkpoint = AsyncMock(
+        return_value=CheckpointDetail(
+            checkpoint_id="cp-1",
+            thread_id="session-1",
+            parent_checkpoint_id=None,
+            created_at="2026-01-01T00:00:00Z",
+            source="loop",
+            step=1,
+            channel_versions={"messages": 1},
+            updated_channels=["messages"],
+            metadata={"source": "loop", "step": 1},
+        )
+    )
+    mock_checkpoint_service.get_state_history = AsyncMock(
+        return_value=[
+            StateHistoryEntry(
+                checkpoint_id="cp-1",
+                thread_id="session-1",
+                created_at="2026-01-01T00:00:00Z",
+                next=["chat"],
+                source="loop",
+                step=1,
+                values={"messages": []},
+                metadata={"source": "loop", "step": 1},
+            )
+        ]
+    )
 
     _app.dependency_overrides[dependencies.get_checkpoint_service] = lambda: mock_checkpoint_service
     _app.dependency_overrides[dependencies.get_chatbot_agent] = lambda: _make_mock_chatbot_agent()

@@ -155,7 +155,7 @@ Before modifying code:
 
 # Task execution plan
 Important: Always plan the task step by step before writing code. Ask for permission to proceed with the plan.
-Important: Before proceed with the plan, create a new file named `.agent/plans/name-of-the-task.md`. Based on the approved plan, list all necessary implementation steps as GitHub-style checkboxes (`- [ ] Step Description`). Use sub-bullets for granular details within each main step.
+Important: Before proceed with the plan, create a new file named `.agents/plans/name-of-the-task.md`. Based on the approved plan, list all necessary implementation steps as GitHub-style checkboxes (`- [ ] Step Description`). Use sub-bullets for granular details within each main step.
 
 - Plans should be detailed enough to execute without ambiguity
 - Each task in the plan must include at least one validation test to verify it works

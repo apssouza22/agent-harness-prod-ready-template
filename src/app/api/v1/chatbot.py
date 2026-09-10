@@ -6,11 +6,16 @@ streaming chat, message history management, and chat history clearing.
 
 import json
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from src.app.api.security.limiter import limiter
 from src.app.api.v1.dtos.chat import ChatRequest, ChatResponse, StreamResponse
+from src.app.api.v1.dtos.checkpoint import (
+    CheckpointDetailResponse,
+    CheckpointListResponse,
+    StateHistoryResponse,
+)
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.metrics.metrics import llm_stream_duration_seconds
@@ -121,4 +126,76 @@ async def clear_chat_history(
         return {"message": "Chat history cleared successfully"}
     except Exception as e:
         logger.error("clear_chat_history_failed", session_id=session.id, error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/checkpoints", response_model=CheckpointListResponse)
+@limiter.limit(settings.RATE_LIMIT_ENDPOINTS["checkpoints"][0])
+async def list_session_checkpoints(
+    request: Request,
+    session: CurrentSessionDep,
+    checkpoint_service: CheckpointServiceDep,
+    limit: int | None = Query(None, ge=1, le=100),
+    before: str | None = Query(None, description="Return checkpoints before this checkpoint id"),
+):
+    """List checkpoint summaries for the current session."""
+    try:
+        checkpoints = await checkpoint_service.list_checkpoints(session.id, limit=limit, before=before)
+        return CheckpointListResponse(checkpoints=checkpoints)
+    except Exception as e:
+        logger.error("list_checkpoints_failed", session_id=session.id, error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/checkpoints/{checkpoint_id}", response_model=CheckpointDetailResponse)
+@limiter.limit(settings.RATE_LIMIT_ENDPOINTS["checkpoints"][0])
+async def get_session_checkpoint(
+    request: Request,
+    checkpoint_id: str,
+    session: CurrentSessionDep,
+    checkpoint_service: CheckpointServiceDep,
+):
+    """Get detailed metadata for a specific session checkpoint."""
+    try:
+        checkpoint = await checkpoint_service.get_checkpoint(session.id, checkpoint_id)
+        if checkpoint is None:
+            raise HTTPException(status_code=404, detail="Checkpoint not found")
+        return CheckpointDetailResponse(checkpoint=checkpoint)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "get_checkpoint_failed",
+            session_id=session.id,
+            checkpoint_id=checkpoint_id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/state/history", response_model=StateHistoryResponse)
+@limiter.limit(settings.RATE_LIMIT_ENDPOINTS["checkpoints"][0])
+async def get_session_state_history(
+    request: Request,
+    session: CurrentSessionDep,
+    checkpoint_service: CheckpointServiceDep,
+    agent: ChatbotAgentDep,
+    limit: int | None = Query(None, ge=1, le=100),
+    before: str | None = Query(None, description="Return snapshots before this checkpoint id"),
+):
+    """Get graph state history for the current session."""
+    try:
+        history = await checkpoint_service.get_state_history(
+            session.id,
+            agent.graph,
+            limit=limit,
+            before=before,
+        )
+        return StateHistoryResponse(history=history)
+    except RuntimeError as e:
+        logger.error("get_state_history_failed", session_id=session.id, error=str(e), exc_info=True)
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error("get_state_history_failed", session_id=session.id, error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

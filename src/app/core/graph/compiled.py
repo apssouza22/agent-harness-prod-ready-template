@@ -69,6 +69,44 @@ class StateGraphCompiled:
         """Return the latest graph state for a thread."""
         return self._state_graph.get_state(config, **kwargs)
 
+    async def aget_state(self, config: RunnableConfig, **kwargs: Any) -> StateSnapshot:
+        """Return the latest graph state for a thread asynchronously."""
+        return await self._state_graph.aget_state(config, **kwargs)
+
+    async def aget_state_history(
+        self,
+        config: RunnableConfig,
+        *,
+        filter: dict[str, Any] | None = None,
+        before: RunnableConfig | None = None,
+        limit: int | None = None,
+    ) -> list[StateSnapshot]:
+        """Return graph state snapshots for a thread, newest first."""
+        snapshots: list[StateSnapshot] = []
+        async for snapshot in self._state_graph.aget_state_history(
+            config,
+            filter=filter,
+            before=before,
+            limit=limit,
+        ):
+            snapshots.append(snapshot)
+        return snapshots
+
+    async def aupdate_state(
+        self,
+        config: RunnableConfig,
+        values: dict[str, Any] | Any,
+        as_node: str | None = None,
+        task_id: str | None = None,
+    ) -> RunnableConfig:
+        """Update graph state for a thread asynchronously."""
+        return await self._state_graph.aupdate_state(
+            config,
+            values,
+            as_node=as_node,
+            task_id=task_id,
+        )
+
     def get_graph(self):
         """Return the graph structure for visualization or introspection."""
         return self._state_graph.get_graph()

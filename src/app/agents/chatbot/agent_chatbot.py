@@ -97,6 +97,13 @@ class AgentChatbot:
     def last_trace_id(self) -> Optional[str]:
         return self._last_trace_id
 
+    @property
+    def graph(self) -> StateGraphCompiled:
+        """Return the compiled graph, raising when not yet compiled."""
+        if self._graph is None:
+            raise RuntimeError("agent graph not compiled")
+        return self._graph
+
     async def compile(self) -> StateGraphCompiled:
         """Compile the graph and prepare for execution."""
         await self._load_mcp_tools()

@@ -143,17 +143,16 @@ async def test_make_checkpointer_uses_injected_pool(test_settings):
 
 @pytest.mark.asyncio
 async def test_checkpoint_service_clear_session_uses_pool(test_settings):
-    mock_pool = MagicMock()
-    mock_conn = AsyncMock()
-    mock_connection_cm = MagicMock()
-    mock_connection_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_connection_cm.__aexit__ = AsyncMock(return_value=None)
-    mock_pool.connection.return_value = mock_connection_cm
+    mock_pool = AsyncMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.setup = AsyncMock()
 
     service = make_checkpoint_service(test_settings, connection_pool=mock_pool)
+    service._checkpointer = mock_checkpointer
+
     await service.clear_session("session-123")
 
-    assert mock_conn.execute.await_count == len(test_settings.CHECKPOINT_TABLES)
+    mock_checkpointer.adelete_thread.assert_awaited_once_with("session-123")
 
 
 @pytest.mark.asyncio

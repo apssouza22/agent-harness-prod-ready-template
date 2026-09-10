@@ -217,6 +217,7 @@ class Settings:
             "text_to_sql": ["15 per minute"],
             "feedback": ["30 per minute"],
             "messages": ["50 per minute"],
+            "checkpoints": ["50 per minute"],
             "register": ["10 per hour"],
             "login": ["20 per minute"],
             "root": ["10 per minute"],

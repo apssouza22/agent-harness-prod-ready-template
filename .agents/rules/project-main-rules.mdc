@@ -92,13 +92,6 @@ Use structlog for all logging with these conventions:
 - Use rich.console for debugging complex data structures
 - Apply rich formatting for evaluation reports and CLI outputs
 
-## Retry Logic
-
-- **Always use tenacity library** for retry logic
-- Configure retries with exponential backoff
-- Set appropriate stop conditions (max attempts, max time)
-- Log retry attempts for observability
-- Example: `@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))`
 
 ## Caching Strategy
 
