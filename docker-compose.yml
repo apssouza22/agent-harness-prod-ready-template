@@ -35,6 +35,8 @@ services:
 #    depends_on:
 #      db:
 #        condition: service_healthy
+#      redis:
+#        condition: service_healthy
 #    healthcheck:
 #      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
 #      interval: 30s
@@ -87,6 +89,22 @@ services:
       - monitoring
     restart: always
 
+  redis:
+    image: redis/redis-stack-server:7.4.0-v1
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-stack-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - monitoring
+    restart: always
+
   bifrost:
     env_file:
       - .env.development
@@ -113,3 +131,4 @@ networks:
 volumes:
   grafana-storage:
   postgres-data:
+  redis_data:

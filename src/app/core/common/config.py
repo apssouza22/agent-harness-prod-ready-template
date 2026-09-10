@@ -177,6 +177,28 @@ class Settings:
         self.LONG_TERM_MEMORY_COLLECTION_NAME = os.getenv("LONG_TERM_MEMORY_COLLECTION_NAME", "longterm_memory")
         self.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS = os.getenv("LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS") or None
 
+        # Redis connection
+        self.REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+        self.REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+        self.REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+        self.REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+        self.REDIS_SOCKET_TIMEOUT = int(os.getenv("REDIS_SOCKET_TIMEOUT", "30"))
+        self.REDIS_SOCKET_CONNECT_TIMEOUT = int(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "30"))
+        self.REDIS_DECODE_RESPONSES = os.getenv("REDIS_DECODE_RESPONSES", "true").lower() in ("true", "1", "t", "yes")
+
+        # Cache behavior (semantic cache requires Redis Stack with RediSearch module)
+        self.CACHE_TTL_HOURS = int(os.getenv("CACHE_TTL_HOURS", "6"))
+        self.CACHE_SEMANTIC_ENABLED = os.getenv("CACHE_SEMANTIC_ENABLED", "true").lower() in ("true", "1", "t", "yes")
+        self.CACHE_SEMANTIC_SEARCH_TOP_K = int(os.getenv("CACHE_SEMANTIC_SEARCH_TOP_K", "5"))
+        self.CACHE_SEMANTIC_SIMILARITY_THRESHOLD = float(os.getenv("CACHE_SEMANTIC_SIMILARITY_THRESHOLD", "0.7"))
+        self.CACHE_CONFIDENCE_THRESHOLD = float(os.getenv("CACHE_CONFIDENCE_THRESHOLD", "0.90"))
+        self.CACHE_WEIGHT_EXACT = float(os.getenv("CACHE_WEIGHT_EXACT", "0.10"))
+        self.CACHE_WEIGHT_FUZZY = float(os.getenv("CACHE_WEIGHT_FUZZY", "0.20"))
+        self.CACHE_WEIGHT_SEMANTIC = float(os.getenv("CACHE_WEIGHT_SEMANTIC", "0.70"))
+        self.CACHE_EMBEDDING_DIMENSIONS = int(os.getenv("CACHE_EMBEDDING_DIMENSIONS", "1536"))
+        self.CACHE_KEY_PREFIX = os.getenv("CACHE_KEY_PREFIX", "agent_cache")
+        self.CACHE_EMBEDDER_MODEL = os.getenv("CACHE_EMBEDDER_MODEL", self.LONG_TERM_MEMORY_EMBEDDER_MODEL)
+
         # JWT Configuration
         self.JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
         self.JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")

@@ -12,6 +12,7 @@ from src.app.agents.open_deep_research.agent_deep_research import DeepResearchAg
 from src.app.agents.text_to_sql.text_sql_agent import TextSQLDeepAgent
 from src.app.api.security.auth import create_access_token, verify_token
 from src.app.api.v1.sanitization import sanitize_string
+from src.app.core.cache.client import CacheClient
 from src.app.core.checkpoint.service import CheckpointService
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import bind_context, logger
@@ -67,6 +68,10 @@ def get_langfuse_tracer(request: Request) -> LangfuseTracer:
     return request.app.state.langfuse_tracer
 
 
+def get_cache_client(request: Request) -> CacheClient | None:
+    return getattr(request.app.state, "cache_client", None)
+
+
 def get_chatbot_agent(request: Request) -> AgentChatbot:
     return request.app.state.chatbot_agent
 
@@ -87,6 +92,7 @@ SessionRepositoryDep = Annotated[SessionRepository, Depends(get_session_reposito
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]
 CheckpointServiceDep = Annotated[CheckpointService, Depends(get_checkpoint_service)]
 LangfuseDep = Annotated[LangfuseTracer, Depends(get_langfuse_tracer)]
+CacheDep = Annotated[CacheClient | None, Depends(get_cache_client)]
 ChatbotAgentDep = Annotated[AgentChatbot, Depends(get_chatbot_agent)]
 DeepResearchAgentDep = Annotated[DeepResearchAgent, Depends(get_deep_research_agent)]
 TextToSqlAgentDep = Annotated[TextSQLDeepAgent, Depends(get_text_to_sql_agent)]

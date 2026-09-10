@@ -84,3 +84,14 @@ graph_node_failures_total = Counter(
     "Graph node failures after retry exhaustion",
     ["agent_name", "node"],
 )
+
+cache_hits_total = Counter(
+    "cache_hits_total",
+    "Total cache hits by layer",
+    ["layer"],
+)
+
+cache_misses_total = Counter(
+    "cache_misses_total",
+    "Total cache misses",
+)

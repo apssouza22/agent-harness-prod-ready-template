@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from src.app.api.security.limiter import limiter
 from src.app.api.v1.dtos.chat import ChatRequest, ChatResponse, StreamResponse
+from src.app.core.cache.schemas import ChatCacheRequest
 from src.app.api.v1.dtos.checkpoint import (
     CheckpointDetailResponse,
     CheckpointListResponse,
@@ -19,7 +20,7 @@ from src.app.api.v1.dtos.checkpoint import (
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.metrics.metrics import llm_stream_duration_seconds
-from src.app.dependencies import ChatbotAgentDep, CheckpointServiceDep, CurrentSessionDep
+from src.app.dependencies import CacheDep, ChatbotAgentDep, CheckpointServiceDep, CurrentSessionDep
 
 router = APIRouter()
 
@@ -31,6 +32,7 @@ async def chat(
     chat_request: ChatRequest,
     session: CurrentSessionDep,
     agent: ChatbotAgentDep,
+    cache_client: CacheDep,
 ):
     """Process a chat request using LangGraph."""
     try:
@@ -39,9 +41,49 @@ async def chat(
             session_id=session.id,
             message_count=len(chat_request.messages),
         )
+
+        cache_request = ChatCacheRequest(
+            messages=chat_request.messages,
+            model=settings.DEFAULT_LLM_MODEL,
+            agent_name=agent.name,
+            session_id=session.id,
+        )
+        query_embedding = None
+
+        if cache_client:
+            try:
+                cache_result = await cache_client.lookup(cache_request, ChatResponse)
+                if cache_result.response:
+                    log_kwargs = {
+                        "hit_type": cache_result.hit_type,
+                        "session_id": session.id,
+                        "agent_name": agent.name,
+                    }
+                    if cache_result.confidence:
+                        log_kwargs.update(
+                            confidence=cache_result.confidence.confidence,
+                            exact_score=cache_result.confidence.exact_score,
+                            fuzzy_score=cache_result.confidence.fuzzy_score,
+                            semantic_score=cache_result.confidence.semantic_score,
+                        )
+                    logger.info("chat_cache_hit", **log_kwargs)
+                    return cache_result.response
+                query_embedding = cache_result.query_embedding
+            except Exception:
+                logger.warning("chat_cache_lookup_failed", session_id=session.id, exc_info=True)
+                query_embedding = None
+
         result = await agent.agent_invoke(chat_request.messages, session.id, user_id=session.user_id)
+        response = ChatResponse(messages=result, trace_id=agent.last_trace_id)
+
+        if cache_client:
+            try:
+                await cache_client.store(cache_request, response, query_embedding=query_embedding)
+            except Exception:
+                logger.warning("chat_cache_store_failed", session_id=session.id, exc_info=True)
+
         logger.info("chat_request_processed", session_id=session.id)
-        return ChatResponse(messages=result, trace_id=agent.last_trace_id)
+        return response
     except Exception as e:
         logger.error("chat_request_failed", session_id=session.id, error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -55,7 +97,10 @@ async def chat_stream(
     session: CurrentSessionDep,
     agent: ChatbotAgentDep,
 ):
-    """Process a chat request using LangGraph with streaming response."""
+    """Process a chat request using LangGraph with streaming response.
+
+    TODO: Add response caching for streaming once full response assembly is supported.
+    """
     try:
         logger.info(
             "stream_chat_request_received",

@@ -21,6 +21,8 @@ from src.app.api.metrics.http_metrics import setup_metrics
 from src.app.api.metrics.middleware import MetricsMiddleware
 from src.app.api.security.limiter import setup_rate_limit
 from src.app.api.v1.api import api_router
+from src.app.core.cache.embeddings import OpenAIEmbeddingsClient
+from src.app.core.cache.factory import make_cache_client
 from src.app.core.checkpoint.factory import make_checkpoint_service
 from src.app.core.db.connection_pool import get_connection_pool, reset_connection_pool
 from src.app.core.common.config import settings
@@ -51,6 +53,9 @@ async def lifespan(app: FastAPI):
     app.state.session_repository = make_session_repository(db_session)
 
     app.state.memory_service = make_memory_service(settings)
+
+    embeddings_client = OpenAIEmbeddingsClient(settings) if settings.CACHE_SEMANTIC_ENABLED else None
+    app.state.cache_client = make_cache_client(settings, embeddings_client=embeddings_client)
 
     connection_pool = await get_connection_pool(settings)
     checkpoint_service = make_checkpoint_service(settings, connection_pool=connection_pool)
