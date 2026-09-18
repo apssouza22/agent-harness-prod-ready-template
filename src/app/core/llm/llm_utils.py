@@ -88,7 +88,7 @@ def prepare_messages(messages: list[Message], llm: BaseChatModel, system_prompt:
         trimmed_messages = _trim_messages(
             dump_messages(messages),
             strategy="last",
-            token_counter=llm,
+            token_counter="approximate",
             max_tokens=settings.MAX_TOKENS,
             start_on="human",
             include_system=True,

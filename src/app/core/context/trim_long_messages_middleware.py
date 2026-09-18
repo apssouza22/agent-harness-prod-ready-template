@@ -6,7 +6,6 @@ Uses LangChain's ``trim_messages`` with a *last* strategy to keep the
 most recent messages when the conversation exceeds the budget.
 """
 
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import trim_messages
 
 from src.app.core.common.logging import logger
@@ -20,12 +19,10 @@ class TrimLongMessagesMiddleware(AgentMiddleware):
     budget, so it is safe to keep permanently in the pipeline.
 
     Args:
-        llm: Chat model instance used for token counting.
         max_tokens: Maximum token budget for the message list.
     """
 
-    def __init__(self, llm: BaseChatModel, max_tokens: int) -> None:
-        self._llm = llm
+    def __init__(self, max_tokens: int) -> None:
         self._max_tokens = max_tokens
 
     async def before_model_call(
@@ -39,7 +36,7 @@ class TrimLongMessagesMiddleware(AgentMiddleware):
             return trim_messages(
                 messages,
                 strategy="last",
-                token_counter=self._llm,
+                token_counter="approximate",
                 max_tokens=self._max_tokens,
                 start_on="human",
                 include_system=True,

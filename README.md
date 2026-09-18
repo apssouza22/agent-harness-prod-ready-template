@@ -121,6 +121,7 @@ Then use `agent.agent_invoke()` or `agent.agent_invoke_stream()` in your route h
 git clone <repository-url>
 cd <project-directory>
 uv sync
+docker compose up
 
 # Configure environment
 cp .env.example .env.development

@@ -25,7 +25,7 @@ def is_token_limit_exceeded(exception: Exception, model_name: str = None) -> boo
             provider = 'anthropic'
         elif model_str.startswith('gemini:') or model_str.startswith('google:'):
             provider = 'gemini'
-        elif model_str.startswith('bedrock:'):
+        elif model_str.startswith('bedrock_converse:') or model_str.startswith('bedrock:'):
             provider = 'bedrock'
 
     # Step 2: Check provider-specific token limit patterns

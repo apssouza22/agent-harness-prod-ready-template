@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "langgraph-fastapi-template"
+name = "agent-harness-template"
 version = "0.1.0"
-description = "LangGraph FastAPI Template"
+description = "Agent Harness template - Production-Ready AI Agent Infrastructure"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+from src.app.core.common.config import settings
 from src.app.core.memory.memory import MemoryService
 from src.app.core.middleware.types import AgentContext, AgentMiddleware, InvokeResult
 
@@ -20,6 +21,9 @@ class MemoryMiddleware(AgentMiddleware):
         return self._memory
 
     async def before_invoke(self, ctx: AgentContext) -> Optional[InvokeResult]:
+        if not settings.LONG_TERM_MEMORY_ENABLED:
+            return None
+
         memory = self._get_memory()
         if ctx.messages:
             retrieved = await memory.search(ctx.user_id, ctx.messages[-1].content)
@@ -27,6 +31,9 @@ class MemoryMiddleware(AgentMiddleware):
         return None
 
     async def after_invoke(self, ctx: AgentContext, result: InvokeResult) -> InvokeResult:
+        if not settings.LONG_TERM_MEMORY_ENABLED:
+            return result
+
         memory = self._get_memory()
         if result:
             messages_dict = [dict(role=m.role, content=str(m.content)) for m in result]

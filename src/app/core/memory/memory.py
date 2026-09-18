@@ -11,7 +11,8 @@ from mem0 import AsyncMemory
 
 from src.app.core.common.config import Settings, settings
 from src.app.core.common.logging import logger
-from src.app.core.llm.factory import build_mem0_openai_config
+from src.app.core.memory.config_builder import build_mem0_embedder_config, build_mem0_llm_config
+from src.app.core.memory.mem0_bedrock_compat import apply_mem0_bedrock_openai_compat
 
 
 class MemoryService:
@@ -28,6 +29,7 @@ class MemoryService:
     async def _get_memory(self) -> AsyncMemory:
         """Lazily initialize and return the mem0 AsyncMemory instance."""
         if self._memory is None:
+            apply_mem0_bedrock_openai_compat()
             self._memory = await AsyncMemory.from_config(config_dict=self._build_config())
             logger.info(
                 "long_term_memory_initialized",
@@ -37,7 +39,6 @@ class MemoryService:
 
     def _build_config(self) -> dict[str, Any]:
         """Build the mem0 configuration dictionary."""
-        mem0_openai_config = build_mem0_openai_config(app_settings=self._settings, bifrost_agent="agent_1")
         config: dict[str, Any] = {
             "vector_store": {
                 "provider": "pgvector",
@@ -50,24 +51,12 @@ class MemoryService:
                     "port": self._settings.POSTGRES_PORT,
                 },
             },
-            "llm": {
-                "provider": "openai",
-                "config": {
-                    "model": self._settings.LONG_TERM_MEMORY_MODEL,
-                    **mem0_openai_config,
-                },
-            },
-            "embedder": {
-                "provider": "openai",
-                "config": {
-                    "model": self._settings.LONG_TERM_MEMORY_EMBEDDER_MODEL,
-                    **mem0_openai_config,
-                },
-            },
+            "llm": build_mem0_llm_config(self._settings),
+            "embedder": build_mem0_embedder_config(self._settings),
         }
 
         if self._settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS:
-            config["custom_instructions"] = self._settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS
+            config["custom_fact_extraction_prompt"] = self._settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS
 
         return config
 
@@ -81,6 +70,9 @@ class MemoryService:
         Returns:
             Formatted string of relevant memories, or empty string on error.
         """
+        if not self._settings.LONG_TERM_MEMORY_ENABLED:
+            return ""
+
         try:
             memory = await self._get_memory()
             results = await memory.search(user_id=str(user_id), query=query)
@@ -99,6 +91,9 @@ class MemoryService:
             messages: The messages to add to memory.
             metadata: Optional metadata to include with the memory update.
         """
+        if not self._settings.LONG_TERM_MEMORY_ENABLED:
+            return
+
         try:
             memory = await self._get_memory()
             await memory.add(messages, user_id=str(user_id), metadata=metadata)
@@ -114,6 +109,9 @@ class MemoryService:
             messages: The messages to add to memory.
             metadata: Optional metadata to include with the memory update.
         """
+        if not self._settings.LONG_TERM_MEMORY_ENABLED:
+            return
+
         asyncio.create_task(self.add(user_id, messages, metadata))
 
 
