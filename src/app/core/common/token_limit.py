@@ -25,6 +25,8 @@ def is_token_limit_exceeded(exception: Exception, model_name: str = None) -> boo
             provider = 'anthropic'
         elif model_str.startswith('gemini:') or model_str.startswith('google:'):
             provider = 'gemini'
+        elif model_str.startswith('bedrock:'):
+            provider = 'bedrock'
 
     # Step 2: Check provider-specific token limit patterns
     if provider == 'openai':
@@ -33,12 +35,15 @@ def is_token_limit_exceeded(exception: Exception, model_name: str = None) -> boo
         return _check_anthropic_token_limit(exception, error_str)
     elif provider == 'gemini':
         return _check_gemini_token_limit(exception, error_str)
+    elif provider == 'bedrock':
+        return _check_bedrock_token_limit(exception, error_str)
 
     # Step 3: If provider unknown, check all providers
     return (
         _check_openai_token_limit(exception, error_str) or
         _check_anthropic_token_limit(exception, error_str) or
-        _check_gemini_token_limit(exception, error_str)
+        _check_gemini_token_limit(exception, error_str) or
+        _check_bedrock_token_limit(exception, error_str)
     )
 
 def _check_openai_token_limit(exception: Exception, error_str: str) -> bool:
@@ -124,6 +129,40 @@ def _check_gemini_token_limit(exception: Exception, error_str: str) -> bool:
         return True
 
     return False
+
+
+def _check_bedrock_token_limit(exception: Exception, error_str: str) -> bool:
+    """Check if exception indicates AWS Bedrock token/context limit exceeded."""
+    if _check_anthropic_token_limit(exception, error_str):
+        return True
+
+    exception_type = str(type(exception)).lower()
+    class_name = exception.__class__.__name__
+
+    is_bedrock_exception = (
+        "bedrock" in exception_type
+        or "botocore" in exception_type
+        or "bedrock" in getattr(exception.__class__, "__module__", "").lower()
+    )
+
+    token_limit_patterns = (
+        "context length",
+        "maximum context",
+        "too many tokens",
+        "input is too long",
+        "prompt is too long",
+        "max_tokens",
+        "token limit",
+    )
+
+    if is_bedrock_exception and any(pattern in error_str for pattern in token_limit_patterns):
+        return True
+
+    if class_name == "ValidationException" and any(pattern in error_str for pattern in token_limit_patterns):
+        return True
+
+    return False
+
 
 # NOTE: This may be out of date or not applicable to your models. Please update this as needed.
 MODEL_TOKEN_LIMITS = {

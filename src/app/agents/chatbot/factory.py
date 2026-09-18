@@ -16,6 +16,7 @@ from src.app.core.context import SummarizationMiddleware, TrimLongMessagesMiddle
 from src.app.core.guardrails import GuardrailMiddleware
 from src.app.core.memory import MemoryMiddleware
 from src.app.core.metrics import LlmMetricsMiddleware
+from src.app.core.llm.factory import resolve_model_identifier
 from src.app.core.middleware import ErrorHandlingMiddleware, LoggingMiddleware
 
 
@@ -49,7 +50,7 @@ async def make_chatbot_agent(
         MemoryMiddleware(),
         SummarizationMiddleware(
             llm=chatbot_model,
-            model_name=f"openai:{settings.DEFAULT_LLM_MODEL}",
+            model_name=resolve_model_identifier(),
         ),
         TrimLongMessagesMiddleware(
             llm=chatbot_model,

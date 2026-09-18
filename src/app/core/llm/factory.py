@@ -3,6 +3,9 @@
 When BIFROST_ENABLED is true, LangChain chat models are pointed at the Bifrost
 /langchain proxy and OpenAI-compatible clients use the /v1 endpoint. Provider
 API keys are managed by Bifrost instead of the application.
+
+When DEFAULT_LLM_PROVIDER=bedrock, models route through langchain-aws
+ChatBedrockConverse using AWS credentials instead of API keys.
 """
 
 from typing import Any, Literal
@@ -18,9 +21,67 @@ settings = default_settings
 
 BifrostAgent = Literal["agent_1", "agent_2"]
 
+OPENAI_ONLY_KWARGS = frozenset({"reasoning"})
+
 
 def _resolve_settings(app_settings: Settings | None = None) -> Settings:
     return app_settings or settings
+
+
+def _parse_model_provider(model_name: str) -> str | None:
+    """Extract the provider prefix from a model identifier, if present."""
+    if ":" not in model_name:
+        return None
+    return model_name.split(":", 1)[0].lower()
+
+
+def resolve_model_identifier(
+    model: str | None = None,
+    provider: str | None = None,
+    app_settings: Settings | None = None,
+) -> str:
+    """Build a provider-prefixed model identifier for LangChain init_chat_model.
+
+    If ``model`` already contains a provider prefix (e.g. ``bedrock:...``),
+    it is returned unchanged. Otherwise the provider is taken from ``provider``
+    or ``DEFAULT_LLM_PROVIDER``.
+    """
+    resolved_settings = _resolve_settings(app_settings)
+    model_name = model or resolved_settings.DEFAULT_LLM_MODEL
+    if ":" in model_name:
+        return model_name
+    resolved_provider = provider or resolved_settings.DEFAULT_LLM_PROVIDER
+    return f"{resolved_provider}:{model_name}"
+
+
+def build_bedrock_client_kwargs(app_settings: Settings | None = None) -> dict[str, Any]:
+    """Build AWS client kwargs for ChatBedrockConverse."""
+    resolved_settings = _resolve_settings(app_settings)
+    kwargs: dict[str, Any] = {"region_name": resolved_settings.AWS_REGION}
+
+    if resolved_settings.AWS_PROFILE:
+        kwargs["credentials_profile_name"] = resolved_settings.AWS_PROFILE
+    if resolved_settings.AWS_ACCESS_KEY_ID:
+        kwargs["aws_access_key_id"] = resolved_settings.AWS_ACCESS_KEY_ID
+    if resolved_settings.AWS_SECRET_ACCESS_KEY:
+        kwargs["aws_secret_access_key"] = resolved_settings.AWS_SECRET_ACCESS_KEY
+    if resolved_settings.AWS_SESSION_TOKEN:
+        kwargs["aws_session_token"] = resolved_settings.AWS_SESSION_TOKEN
+
+    return kwargs
+
+
+def filter_provider_kwargs(model_name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Remove provider-incompatible kwargs before model initialization."""
+    provider = _parse_model_provider(model_name)
+    if provider == "openai":
+        return kwargs
+
+    filtered = {key: value for key, value in kwargs.items() if key not in OPENAI_ONLY_KWARGS}
+    removed = set(kwargs) - set(filtered)
+    if removed:
+        logger.debug("provider_kwargs_filtered", model=model_name, removed_keys=sorted(removed))
+    return filtered
 
 
 def resolve_bifrost_virtual_key(
@@ -69,6 +130,8 @@ def resolve_api_key_for_model(model_name: str | None = None, app_settings: Setti
 
     if model_name:
         normalized = model_name.lower()
+        if normalized.startswith("bedrock:"):
+            return ""
         if normalized.startswith("openai:"):
             return resolved_settings.OPENAI_API_KEY
         if normalized.startswith("anthropic:"):
@@ -102,12 +165,28 @@ def build_chat_model_kwargs(
             bifrost_agent=bifrost_agent,
             has_virtual_key=bool(resolve_bifrost_virtual_key(bifrost_agent=bifrost_agent, app_settings=resolved_settings)),
         )
-        return kwargs
+        return filter_provider_kwargs(kwargs.get("model", ""), kwargs)
 
-    if "api_key" not in kwargs and "model" in kwargs:
-        kwargs["api_key"] = resolve_api_key_for_model(kwargs["model"], resolved_settings)
+    model_name = kwargs.get("model", "")
+    provider = _parse_model_provider(model_name)
 
-    return kwargs
+    if provider == "bedrock":
+        kwargs.update(build_bedrock_client_kwargs(resolved_settings))
+        kwargs.pop("api_key", None)
+        logger.debug(
+            "bedrock_chat_model_routing_enabled",
+            model=model_name,
+            region_name=kwargs.get("region_name"),
+            has_profile=bool(resolved_settings.AWS_PROFILE),
+        )
+        return filter_provider_kwargs(model_name, kwargs)
+
+    if "api_key" not in kwargs and model_name:
+        api_key = resolve_api_key_for_model(model_name, resolved_settings)
+        if api_key:
+            kwargs["api_key"] = api_key
+
+    return filter_provider_kwargs(model_name, kwargs)
 
 
 def make_chat_model(
@@ -122,9 +201,9 @@ def make_chat_model(
     """Create a LangChain chat model with optional fallbacks.
 
     Instantiates the correct provider model based on the ``model`` identifier
-    (e.g. ``openai:gpt-4o``, ``anthropic:claude-3-5-sonnet``). When ``fallbacks``
-    are provided, each fallback model is instantiated with the same kwargs and
-    attached via ``with_fallbacks``.
+    (e.g. ``openai:gpt-4o``, ``bedrock:us.anthropic.claude-3-7-sonnet-20250219-v1:0``).
+    When ``fallbacks`` are provided, each fallback model is instantiated with the
+    same kwargs and attached via ``with_fallbacks``.
 
     Args:
         model: Provider-prefixed model identifier passed to ``init_chat_model``.

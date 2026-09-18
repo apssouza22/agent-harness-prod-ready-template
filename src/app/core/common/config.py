@@ -153,6 +153,14 @@ class Settings:
         self.BIFROST_API_KEY_AGENT_1 = os.getenv("BIFROST_API_KEY_AGENT_1", "")
         self.BIFROST_API_KEY_AGENT_2 = os.getenv("BIFROST_API_KEY_AGENT_2", "")
 
+        # AWS Bedrock (https://docs.aws.amazon.com/bedrock/latest/userguide/setting-up.html)
+        self.AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+        self.AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+        self.AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+        self.AWS_SESSION_TOKEN = os.getenv("AWS_SESSION_TOKEN", "")
+        self.AWS_PROFILE = os.getenv("AWS_PROFILE", "")
+
+        self.DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", "openai")
         self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-5.6-luna")
         self.DEFAULT_LLM_REASONING_EFFORT = os.getenv("DEFAULT_LLM_REASONING_EFFORT", "low")
         self.DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))

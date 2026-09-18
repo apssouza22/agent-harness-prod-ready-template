@@ -299,3 +299,9 @@ Contributions are welcome. Please ensure:
 3. New features include appropriate tests
 4. Documentation is updated
 5. Commit messages follow conventional commits format
+
+
+## TODO
+
+- [ ] Add security red team tests. Eg promptfoo | prompt-shield
+- [ ] Add Ml flow for experiments 

@@ -8,7 +8,7 @@ from deepagents.backends import FilesystemBackend
 from langchain.agents.middleware import PIIMiddleware
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
-from src.app.core.llm.factory import make_chat_model
+from src.app.core.llm.factory import make_chat_model, resolve_model_identifier
 from src.app.core.middleware import (
     AgentContext,
     AgentMiddleware,
@@ -101,7 +101,7 @@ def create_sql_deep_agent():
     db = SQLDatabase.from_uri(f"sqlite:///{db_path}", sample_rows_in_table_info=3)
 
     model = make_chat_model(
-        f"openai:{settings.DEFAULT_LLM_MODEL}",
+        resolve_model_identifier(),
         reasoning={"effort": settings.DEFAULT_LLM_REASONING_EFFORT},
         temperature=0,
         bifrost_agent="agent_1",
