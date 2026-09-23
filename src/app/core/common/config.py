@@ -200,6 +200,15 @@ class Settings:
         self.LONG_TERM_MEMORY_EMBEDDING_DIMENSIONS = int(
             os.getenv("LONG_TERM_MEMORY_EMBEDDING_DIMENSIONS", os.getenv("CACHE_EMBEDDING_DIMENSIONS", "1536"))
         )
+        self.LONG_TERM_MEMORY_ENTITY_BOOST_ENABLED = os.getenv(
+            "LONG_TERM_MEMORY_ENTITY_BOOST_ENABLED", "true"
+        ).lower() in ("true", "1", "t", "yes")
+        self.LONG_TERM_MEMORY_ENTITY_BOOST_WEIGHT = float(
+            os.getenv("LONG_TERM_MEMORY_ENTITY_BOOST_WEIGHT", "0.15")
+        )
+        self.LONG_TERM_MEMORY_ENTITY_SEARCH_POOL_MULTIPLIER = int(
+            os.getenv("LONG_TERM_MEMORY_ENTITY_SEARCH_POOL_MULTIPLIER", "3")
+        )
 
         # Redis connection
         self.REDIS_HOST = os.getenv("REDIS_HOST", "localhost")

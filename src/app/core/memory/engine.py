@@ -8,8 +8,12 @@ from uuid import uuid4
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import logger
 from src.app.core.memory.embedder import MemoryEmbedder
+from src.app.core.memory.entities import MemoryEntity, match_query_entities, normalize_entity_name
+from src.app.core.memory.entity_extractor import EntityExtractor
+from src.app.core.memory.entity_store import EntityLinkStore
 from src.app.core.memory.extractor import FactExtractor
 from src.app.core.memory.reconciler import MemoryAction, MemoryReconciler
+from src.app.core.memory.search_ranker import rank_records_with_entity_boost
 from src.app.core.memory.vector_store import MemoryRecord, PgVectorMemoryStore
 
 
@@ -19,8 +23,10 @@ class LongTermMemoryEngine:
     def __init__(self, app_settings: Settings) -> None:
         self._settings = app_settings
         self._store = PgVectorMemoryStore(app_settings)
+        self._entity_store = EntityLinkStore(app_settings)
         self._embedder = MemoryEmbedder(app_settings)
         self._extractor = FactExtractor(app_settings)
+        self._entity_extractor = EntityExtractor(app_settings)
         self._reconciler = MemoryReconciler(app_settings)
         self._initialized = False
 
@@ -29,18 +35,30 @@ class LongTermMemoryEngine:
         if self._initialized:
             return
         await self._store.initialize()
+        await self._entity_store.initialize()
         self._initialized = True
 
     async def search(self, user_id: str, query: str) -> dict[str, list[dict[str, Any]]]:
         """Search relevant memories for a user query."""
         await self.initialize()
 
+        search_limit = self._settings.LONG_TERM_MEMORY_SEARCH_LIMIT
+        pool_limit = search_limit
+        if self._settings.LONG_TERM_MEMORY_ENTITY_BOOST_ENABLED:
+            pool_limit = max(
+                search_limit,
+                search_limit * self._settings.LONG_TERM_MEMORY_ENTITY_SEARCH_POOL_MULTIPLIER,
+            )
+
         embedding = await self._embedder.embed(query)
         records = await self._store.search(
             embedding,
             filters={"user_id": user_id},
-            limit=self._settings.LONG_TERM_MEMORY_SEARCH_LIMIT,
+            limit=pool_limit,
         )
+
+        if self._settings.LONG_TERM_MEMORY_ENTITY_BOOST_ENABLED and records:
+            records = await self._rank_with_entity_boost(user_id, query, records, limit=search_limit)
 
         results = [
             {
@@ -48,10 +66,66 @@ class LongTermMemoryEngine:
                 "memory": record.memory,
                 "score": record.score,
             }
-            for record in records
+            for record in records[:search_limit]
             if record.memory
         ]
         return {"results": results}
+
+    async def _rank_with_entity_boost(
+        self,
+        user_id: str,
+        query: str,
+        records: list[MemoryRecord],
+        *,
+        limit: int,
+    ) -> list[MemoryRecord]:
+        known_entities = await self._entity_store.list_user_entities(user_id)
+        query_entities = match_query_entities(query, known_entities)
+        if not query_entities:
+            return records[:limit]
+
+        memory_entities = await self._entity_store.get_entities_for_memories(
+            user_id,
+            [record.id for record in records],
+        )
+        memory_entities = self._merge_payload_entities(records, memory_entities)
+
+        ranked = rank_records_with_entity_boost(
+            records,
+            query_entities,
+            memory_entities,
+            boost_weight=self._settings.LONG_TERM_MEMORY_ENTITY_BOOST_WEIGHT,
+            limit=limit,
+        )
+        logger.debug(
+            "memory_entity_boost_applied",
+            user_id=user_id,
+            query_entity_count=len(query_entities),
+            result_count=len(ranked),
+        )
+        return ranked
+
+    @staticmethod
+    def _merge_payload_entities(
+        records: list[MemoryRecord],
+        memory_entities: dict[str, set[str]],
+    ) -> dict[str, set[str]]:
+        merged = {memory_id: set(values) for memory_id, values in memory_entities.items()}
+        for record in records:
+            payload_entities = record.payload.get("entities", [])
+            if not isinstance(payload_entities, list):
+                continue
+            bucket = merged.setdefault(record.id, set())
+            for item in payload_entities:
+                if isinstance(item, dict):
+                    name = str(item.get("name", "")).strip()
+                elif isinstance(item, str):
+                    name = item.strip()
+                else:
+                    continue
+                if name:
+                    bucket.add(normalize_entity_name(name))
+        return merged
 
     async def add(
         self,
@@ -84,7 +158,7 @@ class LongTermMemoryEngine:
 
         stored_results: list[dict[str, Any]] = []
         for action in actions:
-            result = await self._apply_action(action, base_metadata=base_metadata)
+            result = await self._apply_action(action, user_id=user_id, base_metadata=base_metadata)
             if result:
                 stored_results.append(result)
 
@@ -118,6 +192,7 @@ class LongTermMemoryEngine:
         self,
         action: MemoryAction,
         *,
+        user_id: str,
         base_metadata: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Execute a single reconciled memory action."""
@@ -129,12 +204,15 @@ class LongTermMemoryEngine:
             if not action.memory_id:
                 return None
             await self._store.delete(action.memory_id)
+            await self._entity_store.delete_for_memory(action.memory_id)
             logger.info("memory_deleted", memory_id=action.memory_id)
             return {
                 "id": action.memory_id,
                 "memory": action.text,
                 "event": "DELETE",
             }
+
+        entities = await self._entity_extractor.extract_entities(action.text)
 
         if action.event == "UPDATE":
             if not action.memory_id:
@@ -145,8 +223,9 @@ class LongTermMemoryEngine:
                 return None
 
             embedding = await self._embedder.embed(action.text)
-            payload = self._build_updated_payload(existing, action.text, base_metadata)
+            payload = self._build_updated_payload(existing, action.text, base_metadata, entities)
             await self._store.update(action.memory_id, embedding, payload)
+            await self._entity_store.replace_for_memory(user_id, action.memory_id, entities)
             logger.info("memory_updated", memory_id=action.memory_id)
             return {
                 "id": action.memory_id,
@@ -157,8 +236,9 @@ class LongTermMemoryEngine:
 
         embedding = await self._embedder.embed(action.text)
         memory_id = str(uuid4())
-        payload = self._build_new_payload(action.text, base_metadata)
+        payload = self._build_new_payload(action.text, base_metadata, entities)
         await self._store.insert(memory_id, embedding, payload)
+        await self._entity_store.replace_for_memory(user_id, memory_id, entities)
         logger.info("memory_added", memory_id=memory_id)
         return {
             "id": memory_id,
@@ -166,7 +246,16 @@ class LongTermMemoryEngine:
             "event": "ADD",
         }
 
-    def _build_new_payload(self, text: str, base_metadata: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _serialize_entities(entities: list[MemoryEntity]) -> list[dict[str, str]]:
+        return [{"name": entity.name, "type": entity.entity_type} for entity in entities]
+
+    def _build_new_payload(
+        self,
+        text: str,
+        base_metadata: dict[str, Any],
+        entities: list[MemoryEntity],
+    ) -> dict[str, Any]:
         now = datetime.now(UTC).isoformat()
         return {
             **base_metadata,
@@ -174,6 +263,7 @@ class LongTermMemoryEngine:
             "hash": hashlib.md5(text.encode()).hexdigest(),
             "created_at": now,
             "updated_at": now,
+            "entities": self._serialize_entities(entities),
         }
 
     def _build_updated_payload(
@@ -181,10 +271,12 @@ class LongTermMemoryEngine:
         existing: MemoryRecord,
         text: str,
         base_metadata: dict[str, Any],
+        entities: list[MemoryEntity],
     ) -> dict[str, Any]:
         payload = {**existing.payload, **base_metadata}
         payload["data"] = text
         payload["hash"] = hashlib.md5(text.encode()).hexdigest()
         payload["created_at"] = existing.payload.get("created_at", datetime.now(UTC).isoformat())
         payload["updated_at"] = datetime.now(UTC).isoformat()
+        payload["entities"] = self._serialize_entities(entities)
         return payload

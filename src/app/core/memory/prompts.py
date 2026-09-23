@@ -110,3 +110,28 @@ Rules:
 - Generate a new id string only for ADD events.
 - If current memory is empty, ADD all relevant new facts.
 """
+
+
+DEFAULT_ENTITY_EXTRACTION_PROMPT = """You extract named entities from user memory text.
+
+Focus on durable entities such as:
+- people
+- organizations and companies
+- projects and products
+- tools and technologies
+- places and locations
+
+Return JSON only:
+{
+  "entities": [
+    {"name": "John", "type": "person"},
+    {"name": "Acme Corp", "type": "organization"}
+  ]
+}
+
+Rules:
+- Include only entities explicitly mentioned or clearly implied by the text.
+- Do not invent entities.
+- Use concise canonical names.
+- If no entities are present, return {"entities": []}.
+"""
