@@ -413,7 +413,7 @@ async def agent_invoke(self, messages, session_id, user_id=None):
 | `ErrorHandlingMiddleware` | `middleware/` | `on_error` | LLM error metrics; re-raise in dev, empty result in prod |
 | `LlmMetricsMiddleware` | `metrics/` | `before_model_call`, `after_model_call` | Prometheus inference duration and token usage |
 | `MemoryMiddleware` | `memory/` | `before_invoke`, `after_invoke` | mem0 retrieval before run, background update after |
-| `GuardrailMiddleware` | `guardrails/` | `before_invoke`, `after_invoke` | Content filter, PII block/redact, safety check (for agents without graph guardrail nodes) |
+| `GuardrailMiddleware` | `guardrails/` | `before_invoke`, `after_invoke` | Content filter, DeBERTa prompt-injection model, PII block/redact, safety check |
 | `SummarizationMiddleware` | `context/` | `before_model_call` | Calls `summarize_if_too_long` before each LLM call |
 | `TrimLongMessagesMiddleware` | `context/` | `before_model_call` | LangChain `trim_messages` with a "last" strategy |
 
@@ -508,25 +508,25 @@ Pick middleware for behavior that should run identically across agents without t
 
 ## 4. Guardrails: input and output safety
 
-Guardrails ship as factory functions that return LangGraph-compatible nodes for graph-based agents, or as `GuardrailMiddleware` for agents with a closed loop (text-to-SQL). Each agent can tune checks without copying boilerplate.
+Guardrails live in `src/app/core/guardrails/` as service classes (`InputGuardrail`, `OutputGuardrail`) wired through `GuardrailMiddleware` on the agent pipeline. Graph-based agents can also embed the same checks as LangGraph nodes. Each agent can tune checks via `InputGuardrailConfig` / `OutputGuardrailConfig` without copying boilerplate.
 
 ### Input guardrails
 
-Deterministic checks run before the model sees the user text:
+Checks run before the model sees the user text, in order:
 
 ```python
-def create_input_guardrail_node(
-    next_node: str,
-    banned_keywords: list[str] | None = None,
-    pii_check_enabled: bool = True,
-    prompt_injection_check: bool = True,
-    block_pii_types: list[PIIType] | None = None,
-) -> Callable:
+@dataclass(frozen=True)
+class InputGuardrailConfig:
+    content_filter_enabled: bool = True
+    banned_keywords: list[str] | None = None
+    pii_check_enabled: bool = True
+    prompt_injection_check: bool = True          # regex patterns
+    prompt_injection_model_enabled: bool | None = None  # DeBERTa classifier
+    prompt_injection_threshold: float | None = None
+    block_pii_types: list[PIIType] | None = None
 ```
 
-Two layers, in order:
-
-1. Content filter: banned keywords and prompt-injection regexes.
+**1. Content filter** — banned keywords and prompt-injection regexes (fast, always on when enabled):
 
 ```python
 PROMPT_INJECTION_PATTERNS: list[str] = [
@@ -538,7 +538,28 @@ PROMPT_INJECTION_PATTERNS: list[str] = [
 ]
 ```
 
-2. PII detection: regex for SSN, API keys, cards, etc., with Luhn on card numbers.
+**2. DeBERTa prompt-injection classifier** — optional semantic detection via [`ProtectAI/deberta-v3-base-prompt-injection-v2`](https://huggingface.co/ProtectAI/deberta-v3-base-prompt-injection-v2). Disabled by default; enable with `GUARDRAIL_PROMPT_INJECTION_MODEL_ENABLED=true` and install the optional deps (`pip install -e ".[guardrails-ml]"`). Regex runs first; the model only classifies text that already passed the content filter.
+
+```python
+async def detect_prompt_injection(text: str, *, threshold: float | None = None) -> PromptInjectionResult:
+    # Lazy-loads DeBERTa on first call; runs in asyncio.to_thread()
+    # Labels: SAFE (0) vs INJECTION (1). Block when score >= threshold (default 0.5).
+    ...
+```
+
+The model loads once per process (singleton). Inference runs in a background thread. On import or runtime errors the check **fails open** — the request proceeds, same as the output safety evaluator.
+
+```bash
+# Requires: pip install -e ".[guardrails-ml]"
+GUARDRAIL_PROMPT_INJECTION_MODEL_ENABLED=true
+GUARDRAIL_PROMPT_INJECTION_THRESHOLD=0.5
+GUARDRAIL_PROMPT_INJECTION_MODEL=ProtectAI/deberta-v3-base-prompt-injection-v2
+GUARDRAIL_PROMPT_INJECTION_MAX_LENGTH=512
+```
+
+Prometheus exposes `guardrail_checks_total{check_type="prompt_injection_model"}` and `guardrail_requests_blocked_total{reason="prompt_injection"}` when the model is enabled.
+
+**3. PII detection** — regex for SSN, API keys, cards, etc., with Luhn on card numbers.
 
 ```python
 class PIIType(str, Enum):
@@ -1381,7 +1402,7 @@ my_model = create_chat_model(model=f"openai:{settings.DEFAULT_LLM_MODEL}")
 | Concern | Implementation |
 |---|---|
 | Authentication | JWT, session per conversation |
-| Input guardrails | Content filter, injection patterns, PII block |
+| Input guardrails | Content filter, regex + DeBERTa injection detection, PII block |
 | Output guardrails | Redaction modes, small safety model |
 | Agent middleware | `AgentPipeline` / `AgentMiddleware`; invoke + model/tool hooks; [section 3](./ARTICLE.md#3-agent-middleware), [walkthrough](./middleware-for-agent-harness.md) |
 | Long-term memory | mem0 + pgvector via `MemoryMiddleware`, per user, async update |

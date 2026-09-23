@@ -265,6 +265,20 @@ class Settings:
             if value:
                 self.RATE_LIMIT_ENDPOINTS[endpoint] = value
 
+        # Guardrails — model-based prompt injection detection (ProtectAI DeBERTa)
+        self.GUARDRAIL_PROMPT_INJECTION_MODEL_ENABLED = os.getenv(
+            "GUARDRAIL_PROMPT_INJECTION_MODEL_ENABLED", "false"
+        ).lower() in ("true", "1", "t", "yes")
+        self.GUARDRAIL_PROMPT_INJECTION_MODEL = os.getenv(
+            "GUARDRAIL_PROMPT_INJECTION_MODEL", "ProtectAI/deberta-v3-base-prompt-injection-v2"
+        )
+        self.GUARDRAIL_PROMPT_INJECTION_THRESHOLD = float(
+            os.getenv("GUARDRAIL_PROMPT_INJECTION_THRESHOLD", "0.5")
+        )
+        self.GUARDRAIL_PROMPT_INJECTION_MAX_LENGTH = int(
+            os.getenv("GUARDRAIL_PROMPT_INJECTION_MAX_LENGTH", "512")
+        )
+
         # Evaluation Configuration
         self.EVALUATION_LLM = os.getenv("EVALUATION_LLM", "gpt-5")
         self.EVALUATION_BASE_URL = os.getenv("EVALUATION_BASE_URL", "https://api.openai.com/v1")

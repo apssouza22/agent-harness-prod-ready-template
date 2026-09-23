@@ -33,6 +33,11 @@ from src.app.core.guardrails.results import (
     InputGuardrailConfig,
     OutputGuardrailConfig,
 )
+from src.app.core.guardrails.prompt_injection_check import (
+    INJECTION_LABEL,
+    PromptInjectionResult,
+    detect_prompt_injection,
+)
 from src.app.core.guardrails.safety_check import (
     SAFE_REPLACEMENT,
     evaluate_safety,
@@ -120,6 +125,49 @@ class TestContentFilterPromptInjection:
     def test_innocent_text_with_partial_pattern_passes(self):
         result = check_content_filter("Please ignore my previous email")
         assert result.is_blocked is False
+
+
+# ---------------------------------------------------------------------------
+# Model-based prompt injection (DeBERTa)
+# ---------------------------------------------------------------------------
+
+
+class TestPromptInjectionModel:
+    async def test_empty_text_returns_safe(self):
+        result = await detect_prompt_injection("", enabled=True)
+        assert result.is_injection is False
+
+    async def test_disabled_skips_classification(self):
+        with patch("src.app.core.guardrails.prompt_injection_check._classify_sync") as mock_classify:
+            result = await detect_prompt_injection("some text", enabled=False)
+        assert result.is_injection is False
+        mock_classify.assert_not_called()
+
+    @patch("src.app.core.guardrails.prompt_injection_check._classify_sync")
+    async def test_injection_above_threshold_blocked(self, mock_classify):
+        mock_classify.return_value = PromptInjectionResult(
+            is_injection=True, score=0.95, label=INJECTION_LABEL
+        )
+        result = await detect_prompt_injection("malicious prompt", enabled=True)
+        assert result.is_injection is True
+        assert result.score == 0.95
+        assert result.label == INJECTION_LABEL
+
+    @patch("src.app.core.guardrails.prompt_injection_check._classify_sync")
+    async def test_safe_below_threshold_passes(self, mock_classify):
+        mock_classify.return_value = PromptInjectionResult(
+            is_injection=False, score=0.1, label="SAFE"
+        )
+        result = await detect_prompt_injection("What is Python?", enabled=True)
+        assert result.is_injection is False
+
+    @patch(
+        "src.app.core.guardrails.prompt_injection_check._classify_sync",
+        side_effect=RuntimeError("model unavailable"),
+    )
+    async def test_model_failure_fails_open(self, _mock_classify):
+        result = await detect_prompt_injection("some text", enabled=True)
+        assert result.is_injection is False
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +427,42 @@ class TestInputGuardrail:
         result = await guardrail.validate("")
         assert result.passed is True
 
+    @patch("src.app.core.guardrails.input_guardrail.detect_prompt_injection", new_callable=AsyncMock)
+    async def test_model_prompt_injection_blocks(self, mock_detect):
+        mock_detect.return_value = PromptInjectionResult(
+            is_injection=True, score=0.92, label=INJECTION_LABEL
+        )
+        guardrail = InputGuardrail(
+            config=InputGuardrailConfig(prompt_injection_model_enabled=True),
+            source=GuardrailSource.MIDDLEWARE,
+        )
+        result = await guardrail.validate("Crafty injection attempt")
+        assert result.passed is False
+        assert result.block_reason == InputBlockReason.PROMPT_INJECTION
+        assert result.blocked_message == BLOCKED_INPUT_MESSAGE
+
+    @patch("src.app.core.guardrails.input_guardrail.detect_prompt_injection", new_callable=AsyncMock)
+    async def test_model_prompt_injection_safe_passes(self, mock_detect):
+        mock_detect.return_value = PromptInjectionResult(
+            is_injection=False, score=0.05, label="SAFE"
+        )
+        guardrail = InputGuardrail(
+            config=InputGuardrailConfig(prompt_injection_model_enabled=True),
+            source=GuardrailSource.MIDDLEWARE,
+        )
+        result = await guardrail.validate("What is Python?")
+        assert result.passed is True
+
+    @patch("src.app.core.guardrails.input_guardrail.detect_prompt_injection", new_callable=AsyncMock)
+    async def test_model_prompt_injection_disabled_skips(self, mock_detect):
+        guardrail = InputGuardrail(
+            config=InputGuardrailConfig(prompt_injection_model_enabled=False),
+            source=GuardrailSource.MIDDLEWARE,
+        )
+        result = await guardrail.validate("What is Python?")
+        assert result.passed is True
+        mock_detect.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Output guardrail service
@@ -484,6 +568,27 @@ class TestGuardrailMiddleware:
         )
         result = await middleware.before_invoke(ctx)
         assert result is None
+
+    @patch("src.app.core.guardrails.input_guardrail.detect_prompt_injection", new_callable=AsyncMock)
+    async def test_before_invoke_blocks_model_prompt_injection(self, mock_detect):
+        mock_detect.return_value = PromptInjectionResult(
+            is_injection=True, score=0.88, label=INJECTION_LABEL
+        )
+        middleware = GuardrailMiddleware()
+        middleware._input_guardrail = InputGuardrail(
+            config=InputGuardrailConfig(prompt_injection_model_enabled=True),
+            source=GuardrailSource.MIDDLEWARE,
+        )
+        ctx = AgentContext(
+            messages=[Message(role="user", content="Crafty injection attempt")],
+            session_id="sess-1",
+            user_id=1,
+            config={},
+            agent_name="test",
+        )
+        result = await middleware.before_invoke(ctx)
+        assert result is not None
+        assert result[0].content == BLOCKED_INPUT_MESSAGE
 
     @patch("src.app.core.guardrails.output_guardrail.evaluate_safety", new_callable=AsyncMock, return_value=True)
     async def test_after_invoke_redacts_pii(self, _mock_safety):
@@ -679,6 +784,66 @@ class TestGuardrailMetrics:
         after = _get_counter_value(
             guardrail_requests_blocked_total,
             {"guardrail_type": "input", "reason": "content_filter"},
+        )
+        assert after == before + 1
+
+    @patch("src.app.core.guardrails.input_guardrail.detect_prompt_injection", new_callable=AsyncMock)
+    async def test_prompt_injection_model_blocked_increments(self, mock_detect):
+        mock_detect.return_value = PromptInjectionResult(
+            is_injection=True, score=0.9, label=INJECTION_LABEL
+        )
+        before = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "prompt_injection_model", "result": "blocked"},
+        )
+        guardrail = InputGuardrail(
+            config=InputGuardrailConfig(prompt_injection_model_enabled=True),
+            source=GuardrailSource.MIDDLEWARE,
+        )
+        await guardrail.validate("Crafty injection")
+        after = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "prompt_injection_model", "result": "blocked"},
+        )
+        assert after == before + 1
+
+    @patch("src.app.core.guardrails.input_guardrail.detect_prompt_injection", new_callable=AsyncMock)
+    async def test_prompt_injection_model_passed_increments(self, mock_detect):
+        mock_detect.return_value = PromptInjectionResult(
+            is_injection=False, score=0.1, label="SAFE"
+        )
+        before = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "prompt_injection_model", "result": "passed"},
+        )
+        guardrail = InputGuardrail(
+            config=InputGuardrailConfig(prompt_injection_model_enabled=True),
+            source=GuardrailSource.MIDDLEWARE,
+        )
+        await guardrail.validate("What is Python?")
+        after = _get_counter_value(
+            guardrail_checks_total,
+            {"guardrail_type": "input", "check_type": "prompt_injection_model", "result": "passed"},
+        )
+        assert after == before + 1
+
+    @patch("src.app.core.guardrails.input_guardrail.detect_prompt_injection", new_callable=AsyncMock)
+    async def test_requests_blocked_prompt_injection_increments(self, mock_detect):
+        mock_detect.return_value = PromptInjectionResult(
+            is_injection=True, score=0.9, label=INJECTION_LABEL
+        )
+        before = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "input", "reason": "prompt_injection"},
+        )
+        guardrail = InputGuardrail(
+            config=InputGuardrailConfig(prompt_injection_model_enabled=True),
+            source=GuardrailSource.MIDDLEWARE,
+        )
+        await guardrail.validate("Crafty injection")
+        after = _get_counter_value(
+            guardrail_requests_blocked_total,
+            {"guardrail_type": "input", "reason": "prompt_injection"},
         )
         assert after == before + 1
 

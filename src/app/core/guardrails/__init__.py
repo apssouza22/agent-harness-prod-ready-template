@@ -28,6 +28,7 @@ from src.app.core.guardrails.content_filter import ContentFilterResult, check_co
 from src.app.core.guardrails.input_guardrail import InputGuardrail
 from src.app.core.guardrails.output_guardrail import OutputGuardrail
 from src.app.core.guardrails.pii import PIIStrategy, PIIType, apply_pii_strategy, detect_pii
+from src.app.core.guardrails.prompt_injection_check import PromptInjectionResult, detect_prompt_injection
 from src.app.core.guardrails.results import (
     GuardrailSource,
     InputGuardrailConfig,

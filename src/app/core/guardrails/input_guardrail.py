@@ -8,8 +8,10 @@ from src.app.core.guardrails.constants import (
     BLOCKED_PII_MESSAGE,
     INPUT_BLOCK_PII_TYPES,
 )
+from src.app.core.common.config import settings
 from src.app.core.guardrails.content_filter import check_content_filter
 from src.app.core.guardrails.pii import PIIType, detect_pii
+from src.app.core.guardrails.prompt_injection_check import detect_prompt_injection
 from src.app.core.guardrails.results import (
     GuardrailSource,
     InputBlockReason,
@@ -40,6 +42,12 @@ class InputGuardrail:
         self._source = source
         self._langfuse_tracer = langfuse_tracer
         self._block_pii_types = self._config.block_pii_types or INPUT_BLOCK_PII_TYPES
+        self._prompt_injection_model_enabled = (
+            self._config.prompt_injection_model_enabled
+            if self._config.prompt_injection_model_enabled is not None
+            else settings.GUARDRAIL_PROMPT_INJECTION_MODEL_ENABLED
+        )
+        self._prompt_injection_threshold = self._config.prompt_injection_threshold
 
     async def validate(
         self,
@@ -67,6 +75,16 @@ class InputGuardrail:
                         "reason": filter_result.filter_reason,
                     }
                     return filter_result
+
+            if self._prompt_injection_model_enabled:
+                injection_result = await self._run_prompt_injection_model(content)
+                if injection_result is not None:
+                    span_result["output"] = {
+                        "status": "blocked",
+                        "check": InputBlockReason.PROMPT_INJECTION.value,
+                        "reason": injection_result.filter_reason,
+                    }
+                    return injection_result
 
             if self._config.pii_check_enabled:
                 pii_result = self._run_pii_check(content)
@@ -110,6 +128,41 @@ class InputGuardrail:
 
         guardrail_checks_total.labels(
             guardrail_type="input", check_type="content_filter", result="passed"
+        ).inc()
+        return None
+
+    async def _run_prompt_injection_model(self, content: str) -> InputGuardrailResult | None:
+        start = time.perf_counter()
+        injection_result = await detect_prompt_injection(
+            content,
+            threshold=self._prompt_injection_threshold,
+            enabled=self._prompt_injection_model_enabled,
+        )
+        guardrail_check_duration_seconds.labels(
+            guardrail_type="input", check_type="prompt_injection_model"
+        ).observe(time.perf_counter() - start)
+
+        if injection_result.is_injection:
+            guardrail_checks_total.labels(
+                guardrail_type="input", check_type="prompt_injection_model", result="blocked"
+            ).inc()
+            guardrail_requests_blocked_total.labels(
+                guardrail_type="input", reason="prompt_injection"
+            ).inc()
+            reason = (
+                f"Model detected prompt injection (label={injection_result.label}, "
+                f"score={injection_result.score:.3f})"
+            )
+            logger.info("input_guardrail_prompt_injection_blocked", score=injection_result.score)
+            return InputGuardrailResult(
+                passed=False,
+                block_reason=InputBlockReason.PROMPT_INJECTION,
+                blocked_message=BLOCKED_INPUT_MESSAGE,
+                filter_reason=reason,
+            )
+
+        guardrail_checks_total.labels(
+            guardrail_type="input", check_type="prompt_injection_model", result="passed"
         ).inc()
         return None
 

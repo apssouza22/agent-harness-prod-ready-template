@@ -46,6 +46,11 @@ Your agent is a self-contained directory under `src/app/agents/`.  The harness h
 **LLM Management**
 - Automatic retries with exponential backoff
 
+**Guardrails**
+- Input: banned keywords, regex prompt-injection patterns, optional DeBERTa classifier (`ProtectAI/deberta-v3-base-prompt-injection-v2`), PII block
+- Output: PII redaction (redact, mask, hash, block) and LLM safety evaluation
+- `GuardrailMiddleware` applies checks on every agent invocation; Prometheus metrics and Langfuse spans per check
+
 **Evaluation Framework**
 - Metric-based evaluation of model outputs using Langfuse traces
 - Built-in metrics: relevancy, helpfulness, conciseness, hallucination, toxicity
@@ -194,10 +199,54 @@ Key variables:
 | MCP | `MCP_PROTOCOL_MODE` | `auto` |
 | MCP | `MCP_TOOL_CACHE_MODE` | `use` |
 | Rate Limit | `RATE_LIMIT_DEFAULT` | `200/day, 50/hour` |
+| Guardrails | `GUARDRAIL_PROMPT_INJECTION_MODEL_ENABLED` | `false` |
+| Guardrails | `GUARDRAIL_PROMPT_INJECTION_THRESHOLD` | `0.5` |
+| Guardrails | `GUARDRAIL_PROMPT_INJECTION_MODEL` | `ProtectAI/deberta-v3-base-prompt-injection-v2` |
 
 See `.env.example` for the complete list.
 
 ## Key Capabilities
+
+### Guardrails
+
+Input and output safety live in `src/app/core/guardrails/` and run via `GuardrailMiddleware` on the agent pipeline.
+
+**Input checks** (in order):
+1. **Content filter** — banned keywords and regex prompt-injection patterns (fast, always on)
+2. **DeBERTa classifier** — semantic prompt-injection detection (optional, off by default)
+3. **PII block** — API keys, SSN, credit cards
+
+**Output checks:**
+- PII redaction into tokens like `[REDACTED_EMAIL]`
+- LLM safety evaluation (SAFE vs UNSAFE); unsafe responses are replaced with a canned message
+
+Enable the DeBERTa model-based prompt injection layer:
+
+```bash
+# Install optional ML dependencies
+uv sync --extra guardrails-ml
+
+# Add to .env.development
+GUARDRAIL_PROMPT_INJECTION_MODEL_ENABLED=true
+GUARDRAIL_PROMPT_INJECTION_THRESHOLD=0.5
+```
+
+The model loads lazily on first use (~400MB download from Hugging Face). Inference runs in a background thread so it does not block the event loop. On model errors the check fails open (request proceeds), consistent with the output safety check.
+
+Per-agent tuning via `InputGuardrailConfig` (when wiring `InputGuardrail` directly):
+
+```python
+from src.app.core.guardrails import InputGuardrail, InputGuardrailConfig
+
+InputGuardrail(
+    config=InputGuardrailConfig(
+        prompt_injection_model_enabled=True,
+        prompt_injection_threshold=0.7,
+    ),
+)
+```
+
+`GuardrailMiddleware` reads the global env flag by default; set `GUARDRAIL_PROMPT_INJECTION_MODEL_ENABLED=true` to enable it for all agents using the middleware.
 
 ### Long-Term Memory
 
@@ -304,5 +353,5 @@ Contributions are welcome. Please ensure:
 
 ## TODO
 
-- [ ] Add security red team tests. Eg promptfoo | prompt-shield
-- [ ] Add Ml flow for experiments 
+- [ ] Add security red team tests (e.g. promptfoo) to benchmark guardrails end-to-end
+- [ ] Add MLflow for experiments

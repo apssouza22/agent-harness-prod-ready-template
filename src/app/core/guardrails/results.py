@@ -17,6 +17,7 @@ class InputBlockReason(str, Enum):
     """Reason an input guardrail blocked a request."""
 
     CONTENT_FILTER = "content_filter"
+    PROMPT_INJECTION = "prompt_injection"
     PII = "pii"
 
 
@@ -35,6 +36,8 @@ class InputGuardrailConfig:
     banned_keywords: list[str] | None = None
     pii_check_enabled: bool = True
     prompt_injection_check: bool = True
+    prompt_injection_model_enabled: bool | None = None
+    prompt_injection_threshold: float | None = None
     block_pii_types: list[PIIType] | None = None
 
 

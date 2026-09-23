@@ -61,10 +61,11 @@ class GuardrailMiddleware(AgentMiddleware):
         result = await self._input_guardrail.validate(last_content, trace=trace)
 
         if not result.passed:
-            if result.block_reason == InputBlockReason.CONTENT_FILTER:
+            if result.block_reason in (InputBlockReason.CONTENT_FILTER, InputBlockReason.PROMPT_INJECTION):
                 logger.info(
                     "middleware_input_guardrail_blocked",
                     reason=result.filter_reason,
+                    block_reason=result.block_reason.value,
                     session_id=ctx.session_id,
                 )
                 return [Message(role="assistant", content=BLOCKED_INPUT_MESSAGE)]
