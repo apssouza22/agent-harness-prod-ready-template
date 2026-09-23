@@ -1,64 +1,38 @@
-"""Long-term memory management using mem0 and pgvector.
+"""Long-term memory management using local pgvector storage.
 
 This module provides a MemoryService class for managing long-term memory operations
-including initialization, search, and updates using the mem0 library with PostgreSQL/pgvector backend.
+including initialization, search, and updates using pgvector with LLM fact extraction.
 """
 
 import asyncio
 from typing import Any, Optional
 
-from mem0 import AsyncMemory
-
 from src.app.core.common.config import Settings, settings
 from src.app.core.common.logging import logger
-from src.app.core.memory.config_builder import build_mem0_embedder_config, build_mem0_llm_config
-from src.app.core.memory.mem0_bedrock_compat import apply_mem0_bedrock_openai_compat
+from src.app.core.memory.engine import LongTermMemoryEngine
 
 
 class MemoryService:
-    """Service for long-term memory operations using mem0 and pgvector.
+    """Service for long-term memory operations using pgvector and LLM extraction.
 
-    Encapsulates the AsyncMemory singleton and exposes typed methods for
+    Encapsulates the LongTermMemoryEngine and exposes typed methods for
     searching and updating user memories.
     """
 
     def __init__(self, app_settings: Settings | None = None) -> None:
         self._settings = app_settings or settings
-        self._memory: Optional[AsyncMemory] = None
+        self._engine: Optional[LongTermMemoryEngine] = None
 
-    async def _get_memory(self) -> AsyncMemory:
-        """Lazily initialize and return the mem0 AsyncMemory instance."""
-        if self._memory is None:
-            apply_mem0_bedrock_openai_compat()
-            self._memory = await AsyncMemory.from_config(config_dict=self._build_config())
+    async def _get_engine(self) -> LongTermMemoryEngine:
+        """Lazily initialize and return the long-term memory engine."""
+        if self._engine is None:
+            self._engine = LongTermMemoryEngine(self._settings)
+            await self._engine.initialize()
             logger.info(
                 "long_term_memory_initialized",
                 collection_name=self._settings.LONG_TERM_MEMORY_COLLECTION_NAME,
             )
-        return self._memory
-
-    def _build_config(self) -> dict[str, Any]:
-        """Build the mem0 configuration dictionary."""
-        config: dict[str, Any] = {
-            "vector_store": {
-                "provider": "pgvector",
-                "config": {
-                    "collection_name": self._settings.LONG_TERM_MEMORY_COLLECTION_NAME,
-                    "dbname": self._settings.POSTGRES_DB,
-                    "user": self._settings.POSTGRES_USER,
-                    "password": self._settings.POSTGRES_PASSWORD,
-                    "host": self._settings.POSTGRES_HOST,
-                    "port": self._settings.POSTGRES_PORT,
-                },
-            },
-            "llm": build_mem0_llm_config(self._settings),
-            "embedder": build_mem0_embedder_config(self._settings),
-        }
-
-        if self._settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS:
-            config["custom_fact_extraction_prompt"] = self._settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS
-
-        return config
+        return self._engine
 
     async def search(self, user_id: int, query: str) -> str:
         """Get relevant memories for a user and query.
@@ -74,8 +48,8 @@ class MemoryService:
             return ""
 
         try:
-            memory = await self._get_memory()
-            results = await memory.search(user_id=str(user_id), query=query)
+            engine = await self._get_engine()
+            results = await engine.search(user_id=str(user_id), query=query)
             memory_result = "\n".join(f"* {result['memory']}" for result in results["results"])
             logger.debug("relevant_memory_retrieved", user_id=user_id, result_count=len(results["results"]))
             return memory_result
@@ -95,8 +69,8 @@ class MemoryService:
             return
 
         try:
-            memory = await self._get_memory()
-            await memory.add(messages, user_id=str(user_id), metadata=metadata)
+            engine = await self._get_engine()
+            await engine.add(messages, user_id=str(user_id), metadata=metadata)
             logger.info("long_term_memory_updated_successfully", user_id=user_id)
         except Exception as e:
             logger.exception("failed_to_update_long_term_memory", user_id=user_id, error=str(e))
@@ -113,5 +87,3 @@ class MemoryService:
             return
 
         asyncio.create_task(self.add(user_id, messages, metadata))
-
-

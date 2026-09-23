@@ -84,20 +84,6 @@ def test_build_openai_client_kwargs_with_agent_1(bifrost_settings):
     assert kwargs["base_url"] == "http://bifrost:8080/v1"
 
 
-def test_build_mem0_openai_config_with_bifrost(bifrost_settings):
-    mem0_config = factory.build_mem0_openai_config()
-
-    assert mem0_config["api_key"] == "test-virtual-key"
-    assert mem0_config["openai_base_url"] == "http://bifrost:8080/v1"
-
-
-def test_build_mem0_openai_config_with_agent_1(bifrost_settings):
-    mem0_config = factory.build_mem0_openai_config(bifrost_agent="agent_1")
-
-    assert mem0_config["api_key"] == "sk-bf-agent-1-test"
-    assert mem0_config["openai_base_url"] == "http://bifrost:8080/v1"
-
-
 def test_resolve_api_key_for_model_uses_bifrost_key(bifrost_settings):
     assert factory.resolve_api_key_for_model("openai:gpt-4o-mini") == "test-dummy-key"
 

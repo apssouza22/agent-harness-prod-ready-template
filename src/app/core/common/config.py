@@ -180,10 +180,23 @@ class Settings:
         self.GRAPH_TOOL_IDLE_TIMEOUT = float(os.getenv("GRAPH_TOOL_IDLE_TIMEOUT", "60"))
 
         # Long term memory Configuration
+        self.LONG_TERM_MEMORY_ENABLED = os.getenv("LONG_TERM_MEMORY_ENABLED", "true").lower() in (
+            "true",
+            "1",
+            "t",
+            "yes",
+        )
         self.LONG_TERM_MEMORY_MODEL = os.getenv("LONG_TERM_MEMORY_MODEL", "gpt-5-nano")
+        self.LONG_TERM_MEMORY_LLM_PROVIDER = os.getenv("LONG_TERM_MEMORY_LLM_PROVIDER", "")
         self.LONG_TERM_MEMORY_EMBEDDER_MODEL = os.getenv("LONG_TERM_MEMORY_EMBEDDER_MODEL", "text-embedding-3-small")
+        self.LONG_TERM_MEMORY_EMBEDDER_PROVIDER = os.getenv("LONG_TERM_MEMORY_EMBEDDER_PROVIDER", "")
         self.LONG_TERM_MEMORY_COLLECTION_NAME = os.getenv("LONG_TERM_MEMORY_COLLECTION_NAME", "longterm_memory")
         self.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS = os.getenv("LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS") or None
+        self.LONG_TERM_MEMORY_SEARCH_LIMIT = int(os.getenv("LONG_TERM_MEMORY_SEARCH_LIMIT", "10"))
+        self.LONG_TERM_MEMORY_DEDUP_DISTANCE = float(os.getenv("LONG_TERM_MEMORY_DEDUP_DISTANCE", "0.15"))
+        self.LONG_TERM_MEMORY_EMBEDDING_DIMENSIONS = int(
+            os.getenv("LONG_TERM_MEMORY_EMBEDDING_DIMENSIONS", os.getenv("CACHE_EMBEDDING_DIMENSIONS", "1536"))
+        )
 
         # Redis connection
         self.REDIS_HOST = os.getenv("REDIS_HOST", "localhost")

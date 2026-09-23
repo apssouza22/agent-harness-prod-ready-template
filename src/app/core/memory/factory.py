@@ -7,7 +7,7 @@ from src.app.core.memory.memory import MemoryService
 
 
 def make_memory_service(app_settings: Settings | None = None) -> MemoryService:
-    """Create a memory service for long-term user memory via mem0.
+    """Create a memory service for long-term user memory via pgvector.
 
     Args:
         app_settings: Application settings. Falls back to the module-level singleton.

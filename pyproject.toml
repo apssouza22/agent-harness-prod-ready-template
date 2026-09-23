@@ -41,7 +41,6 @@ dependencies = [
     "colorama>=0.4.6",
     "ddgs>=9.6.0",
     "tenacity>=9.1.2",
-    "mem0ai>=1.0.0",
     "uvloop>=0.22.1",
     "httpx>=0.28.1",
     "rich>=13.7.0",
