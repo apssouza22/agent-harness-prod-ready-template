@@ -224,6 +224,17 @@ class Settings:
         self.LONG_TERM_MEMORY_HYBRID_RRF_K = int(os.getenv("LONG_TERM_MEMORY_HYBRID_RRF_K", "60"))
         self.LONG_TERM_MEMORY_KEYWORD_SEARCH_CONFIG = os.getenv("LONG_TERM_MEMORY_KEYWORD_SEARCH_CONFIG", "simple")
 
+        # Dialogue state tracking
+        self.DIALOGUE_STATE_ENABLED = os.getenv("DIALOGUE_STATE_ENABLED", "true").lower() in (
+            "true",
+            "1",
+            "t",
+            "yes",
+        )
+        self.DIALOGUE_STATE_MODEL = os.getenv("DIALOGUE_STATE_MODEL", "gpt-5-nano")
+        self.DIALOGUE_STATE_LLM_PROVIDER = os.getenv("DIALOGUE_STATE_LLM_PROVIDER", "")
+        self.DIALOGUE_STATE_TABLE_NAME = os.getenv("DIALOGUE_STATE_TABLE_NAME", "dialogue_state")
+
         # Redis connection
         self.REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
         self.REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))

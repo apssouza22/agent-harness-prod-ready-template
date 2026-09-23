@@ -35,6 +35,7 @@ from src.app.core.fault_tolerance import (
 from src.app.core.context import truncate_tool_call_if_too_long
 from src.app.core.mcp.manager import McpManager
 from src.app.core.mcp.mcp_utils import handle_mcp_tool_call
+from src.app.core.dialogue_state import dialogue_state_service
 from src.app.core.memory import memory_service
 
 from src.app.core.llm.factory import make_chat_model, resolve_model_identifier
@@ -150,7 +151,12 @@ class AgentChatbot:
     async def _core_invoke(self, ctx: AgentContext) -> list[Message]:
         """Core graph invocation without cross-cutting concerns."""
         long_term_memory = ctx.metadata.get("long_term_memory", "")
-        agent_input = {"messages": dump_messages(ctx.messages), "long_term_memory": long_term_memory}
+        dialogue_state = ctx.metadata.get("dialogue_state", "")
+        agent_input = {
+            "messages": dump_messages(ctx.messages),
+            "long_term_memory": long_term_memory,
+            "dialogue_state": dialogue_state,
+        }
 
         response = await self._graph.ainvoke(
             agent_input,
@@ -181,10 +187,17 @@ class AgentChatbot:
         relevant_memory = (
             await memory_service.search(user_id, messages[-1].content)
         ) or "No relevant memory found."
+        formatted_dialogue_state = (
+            await dialogue_state_service.get_formatted(session_id)
+        ) or "No structured dialogue state yet."
 
         try:
             async for token, _ in self._graph.astream(
-                {"messages": dump_messages(messages), "long_term_memory": relevant_memory},
+                {
+                    "messages": dump_messages(messages),
+                    "long_term_memory": relevant_memory,
+                    "dialogue_state": formatted_dialogue_state,
+                },
                 config,
                 stream_mode="messages",
             ):
@@ -196,9 +209,9 @@ class AgentChatbot:
 
             state: StateSnapshot = await sync_to_async(self._graph.get_state)(config=config)
             if state.values and "messages" in state.values:
-                memory_service.schedule_add(
-                    user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"]
-                )
+                openai_messages = convert_to_openai_messages(state.values["messages"])
+                memory_service.schedule_add(user_id, openai_messages, config["metadata"])
+                dialogue_state_service.schedule_update(session_id, user_id, openai_messages)
 
         except Exception as stream_error:
             record_llm_error(settings.DEFAULT_LLM_MODEL, self.name)
@@ -306,7 +319,10 @@ class AgentChatbot:
                 ctx, messages=messages, model_name=settings.DEFAULT_LLM_MODEL,
             )
 
-        system_prompt = load_system_prompt(long_term_memory=state.long_term_memory)
+        system_prompt = load_system_prompt(
+            long_term_memory=state.long_term_memory,
+            dialogue_state=state.dialogue_state,
+        )
         prepared = [SystemMessage(content=system_prompt)] + list(messages)
 
         model = chatbot_model.bind_tools(self._get_all_tools())

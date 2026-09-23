@@ -28,6 +28,7 @@ from src.app.core.db.connection_pool import get_connection_pool, reset_connectio
 from src.app.core.common.config import settings
 from src.app.core.common.logging import logger
 from src.app.core.db.factory import make_database
+from src.app.core.dialogue_state.factory import make_dialogue_state_service
 from src.app.core.memory.factory import make_memory_service
 from src.app.core.langfuse.factory import make_langfuse_tracer
 from src.app.core.session.factory import make_session_repository
@@ -54,6 +55,7 @@ async def lifespan(app: FastAPI):
     app.state.session_repository = make_session_repository(db_session)
 
     app.state.memory_service = make_memory_service(settings)
+    app.state.dialogue_state_service = make_dialogue_state_service(settings)
 
     embeddings_client = OpenAIEmbeddingsClient(settings) if settings.CACHE_SEMANTIC_ENABLED else None
     app.state.cache_client = make_cache_client(settings, embeddings_client=embeddings_client)

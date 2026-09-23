@@ -18,6 +18,7 @@ from src.app.core.common.config import Settings
 from src.app.core.common.logging import bind_context, logger
 from src.app.core.db.database import DatabaseFactory
 from src.app.core.langfuse.client import LangfuseTracer
+from src.app.core.dialogue_state.service import DialogueStateService
 from src.app.core.memory.memory import MemoryService
 from src.app.core.mcp.manager import McpManager
 from src.app.core.session.session_model import Session as ChatSession
@@ -61,6 +62,10 @@ def get_memory_service(request: Request) -> MemoryService:
     return request.app.state.memory_service
 
 
+def get_dialogue_state_service(request: Request) -> DialogueStateService:
+    return request.app.state.dialogue_state_service
+
+
 def get_checkpoint_service(request: Request) -> CheckpointService:
     return request.app.state.checkpoint_service
 
@@ -95,6 +100,7 @@ SessionDep = Annotated[Session, Depends(get_db_session)]
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
 SessionRepositoryDep = Annotated[SessionRepository, Depends(get_session_repository)]
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]
+DialogueStateServiceDep = Annotated[DialogueStateService, Depends(get_dialogue_state_service)]
 CheckpointServiceDep = Annotated[CheckpointService, Depends(get_checkpoint_service)]
 LangfuseDep = Annotated[LangfuseTracer, Depends(get_langfuse_tracer)]
 CacheDep = Annotated[CacheClient | None, Depends(get_cache_client)]

@@ -54,6 +54,7 @@ src/
 │       ├── guardrails/      # Input/output safety (+ GuardrailMiddleware)
 │       ├── context/         # Context overflow prevention (+ summarization/trim middleware)
 │       ├── memory/          # Long-term memory (pgvector + hybrid search) (+ MemoryMiddleware)
+│       ├── dialogue_state/  # Session dialogue state tracking (+ DialogueStateMiddleware)
 │       ├── checkpoint/      # State persistence
 │       ├── mcp/             # MCP manager, factory, shared HTTP pool, tool helpers
 │       ├── metrics/         # Prometheus definitions (+ LlmMetricsMiddleware)
@@ -65,7 +66,7 @@ src/
 └── cli/                     # CLI clients
 ```
 
-Agents live in self-contained directories under `src/app/agents/`: graph, prompt, tools. Auth, memory, checkpointing, guardrails, metrics, and the agent harness (`AgentPipeline`, logging, errors) in `src/app/core/middleware/` ([middleware article](./middleware-for-agent-harness.md)) come in through `src/app/core/`. Domain-specific middleware lives alongside its package: `GuardrailMiddleware` in `guardrails/`, `MemoryMiddleware` in `memory/`, `LlmMetricsMiddleware` in `metrics/`, and `SummarizationMiddleware` / `TrimLongMessagesMiddleware` in `context/`.
+Agents live in self-contained directories under `src/app/agents/`: graph, prompt, tools. Auth, memory, checkpointing, guardrails, metrics, and the agent harness (`AgentPipeline`, logging, errors) in `src/app/core/middleware/` ([middleware article](./middleware-for-agent-harness.md)) come in through `src/app/core/`. Domain-specific middleware lives alongside its package: `GuardrailMiddleware` in `guardrails/`, `MemoryMiddleware` in `memory/`, `DialogueStateMiddleware` in `dialogue_state/`, `LlmMetricsMiddleware` in `metrics/`, and `SummarizationMiddleware` / `TrimLongMessagesMiddleware` in `context/`.
 
 Three reference agents show three shapes of graph:
 
@@ -413,6 +414,7 @@ async def agent_invoke(self, messages, session_id, user_id=None):
 | `ErrorHandlingMiddleware` | `middleware/` | `on_error` | LLM error metrics; re-raise in dev, empty result in prod |
 | `LlmMetricsMiddleware` | `metrics/` | `before_model_call`, `after_model_call` | Prometheus inference duration and token usage |
 | `MemoryMiddleware` | `memory/` | `before_invoke`, `after_invoke` | Hybrid retrieval before run, background reconcile/update after |
+| `DialogueStateMiddleware` | `dialogue_state/` | `before_invoke`, `after_invoke` | Load session dialogue state before run, background LLM update after |
 | `GuardrailMiddleware` | `guardrails/` | `before_invoke`, `after_invoke` | Content filter, DeBERTa prompt-injection model, PII block/redact, safety check |
 | `SummarizationMiddleware` | `context/` | `before_model_call` | Calls `summarize_if_too_long` before each LLM call |
 | `TrimLongMessagesMiddleware` | `context/` | `before_model_call` | LangChain `trim_messages` with a "last" strategy |
@@ -737,7 +739,60 @@ Memory updates are scheduled with `asyncio.create_task` so they never block the 
 
 ---
 
-## 6. Context management
+## 6. Dialogue state tracking
+
+Long-term memory stores durable user facts across sessions. **Dialogue state tracking** is separate: it keeps a structured snapshot of the *current* conversation inside a single session.
+
+It tracks topic, active goals, slots, pending clarifications, entities in focus, conversation phase, and a short rolling summary.
+
+[`DialogueStateMiddleware`](../src/app/core/dialogue_state/middleware.py) mirrors the memory middleware pattern:
+
+```python
+class DialogueStateMiddleware(AgentMiddleware):
+    async def before_invoke(self, ctx: AgentContext) -> Optional[InvokeResult]:
+        if not settings.DIALOGUE_STATE_ENABLED:
+            return None
+        service = self._get_service()
+        formatted_state = await service.get_formatted(ctx.session_id)
+        ctx.metadata["dialogue_state"] = formatted_state or "No structured dialogue state yet."
+        return None
+
+    async def after_invoke(self, ctx: AgentContext, result: InvokeResult) -> InvokeResult:
+        if not settings.DIALOGUE_STATE_ENABLED:
+            return result
+        service = self._get_service()
+        if result:
+            messages_dict = [dict(role=m.role, content=str(m.content)) for m in result]
+            service.schedule_update(ctx.session_id, ctx.user_id, messages_dict)
+        return result
+```
+
+Before each invoke, the middleware loads the session row from PostgreSQL and injects formatted state into graph input and the system prompt:
+
+```python
+agent_input = {
+    "messages": dump_messages(ctx.messages),
+    "long_term_memory": long_term_memory,
+    "dialogue_state": dialogue_state,
+}
+```
+
+```markdown
+# Current conversation state
+{dialogue_state}
+```
+
+Background updates merge the latest turn with the previous JSON state using an LLM updater, then upsert into a `{DIALOGUE_STATE_TABLE_NAME}` table keyed by `session_id`.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DIALOGUE_STATE_ENABLED` | `true` | Toggle dialogue state middleware |
+| `DIALOGUE_STATE_MODEL` | `gpt-5-nano` | LLM for state updates |
+| `DIALOGUE_STATE_TABLE_NAME` | `dialogue_state` | PostgreSQL table for session state |
+
+---
+
+## 7. Context management
 
 Long threads and fat tool payloads blow the context window. `src/app/core/context/` holds the summarization and eviction logic; the chatbot exposes it through [`SummarizationMiddleware`](../src/app/core/context/summarization_middleware.py) and [`TrimLongMessagesMiddleware`](../src/app/core/context/trim_long_messages_middleware.py) on the `before_model_call` hook (see section 3) so every LLM turn gets a budget-safe message list without duplicating logic in `_chat_node`.
 
@@ -850,7 +905,7 @@ If the summarization LLM call itself fails, the function falls back to a plain m
 
 ---
 
-## 7. State persistence (checkpointing)
+## 8. State persistence (checkpointing)
 
 `AsyncPostgresSaver` writes full graph state after each node, so a restart does not wipe the thread and you can resume mid-flow.
 
@@ -890,7 +945,7 @@ async def clear_checkpoints(session_id: str) -> None:
 
 ---
 
-## 8. Authentication and sessions
+## 9. Authentication and sessions
 
 JWT auth with one session per conversation: register, log in for a user-scoped token, create a session row per thread you care about.
 
@@ -922,7 +977,7 @@ Inputs get HTML stripped, `<script>` dropped, null bytes filtered, at both valid
 
 ---
 
-## 9. Observability
+## 10. Observability
 
 Tracing, metrics, and logs are separate systems; the app wires all three.
 
@@ -1010,7 +1065,7 @@ Dev prints colorized console lines; prod emits JSON. Same code paths, different 
 
 ---
 
-## 10. FastAPI: sync routes and SSE
+## 11. FastAPI: sync routes and SSE
 
 Chat has both request/response and SSE streaming via `StreamingResponse` and an async generator:
 
@@ -1063,7 +1118,7 @@ Routes resolve the manager through FastAPI dependencies (`McpManagerDep`) the sa
 
 ---
 
-## 11. MCP (Model Context Protocol)
+## 12. MCP (Model Context Protocol)
 
 Tools can come from external MCP servers. The harness uses LangChain's [`MCPAdapter`](https://docs.langchain.com/oss/python/langchain/mcp/connections) with FastMCP's `ClientGroup` — the production pattern for multi-server deployments with shared HTTP pooling, tool-list caching, and per-call reentrant tool execution.
 
@@ -1153,7 +1208,7 @@ Individual tool invocations do not pin idle sessions between calls. LangChain's 
 
 ---
 
-## 12. Evaluations (LLM-as-judge)
+## 13. Evaluations (LLM-as-judge)
 
 Evals read Langfuse traces, score them with a judge model, and write scores back. Metric definitions are markdown under `src/evals/metrics/prompts/`; a new `.md` file is picked up automatically. Stock prompts cover relevancy, helpfulness, conciseness, hallucination, and toxicity.
 
@@ -1210,7 +1265,7 @@ make eval-no-report    # Skip report generation
 
 ---
 
-## 13. Bifrost API gateway (optional)
+## 14. Bifrost API gateway (optional)
 
 [Bifrost](https://docs.getbifrost.ai/integrations/langchain-sdk) is an AI gateway that sits between the harness and upstream LLM providers. When enabled, every model call—chatbot, deep research, text-to-SQL, safety evaluation, memory extraction/embeddings, and the evaluation judge—routes through Bifrost instead of hitting provider APIs directly.
 
@@ -1306,7 +1361,7 @@ Open `http://localhost:8090` to add providers, virtual keys, and caching rules t
 
 ---
 
-## 14. Configuration
+## 15. Configuration
 
 Settings merge from files in this order (later wins):
 
@@ -1336,7 +1391,7 @@ Real env vars always beat the baked-in defaults, which is how you tune one clust
 
 ---
 
-## 15. Docker and Compose
+## 16. Docker and Compose
 
 Slim Python image, non-root user, entrypoint script:
 
@@ -1369,7 +1424,7 @@ make lint                             # Ruff check and format
 
 ---
 
-## 16. Adding your own agent
+## 17. Adding your own agent
 
 One directory per agent. Pick the shape from section 2 that matches how much control you need, then copy the closest reference agent and delete what you do not use.
 
@@ -1485,7 +1540,7 @@ my_model = create_chat_model(model=f"openai:{settings.DEFAULT_LLM_MODEL}")
 
 ---
 
-## 17. Checklist
+## 18. Checklist
 
 | Concern | Implementation |
 |---|---|

@@ -14,6 +14,7 @@ from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
 from src.app.core.mcp.manager import McpManager
 from src.app.core.context import SummarizationMiddleware, TrimLongMessagesMiddleware
 from src.app.core.guardrails import GuardrailMiddleware
+from src.app.core.dialogue_state import DialogueStateMiddleware
 from src.app.core.memory import MemoryMiddleware
 from src.app.core.metrics import LlmMetricsMiddleware
 from src.app.core.llm.factory import resolve_model_identifier
@@ -48,6 +49,7 @@ async def make_chatbot_agent(
         LlmMetricsMiddleware(),
         ErrorHandlingMiddleware(),
         MemoryMiddleware(),
+        DialogueStateMiddleware(),
         SummarizationMiddleware(
             llm=chatbot_model,
             model_name=resolve_model_identifier(),
