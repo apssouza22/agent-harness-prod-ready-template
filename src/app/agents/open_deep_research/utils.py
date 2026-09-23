@@ -10,8 +10,8 @@ from src.app.agents.open_deep_research.config import (
     SEARCH_API,
 )
 from src.app.agents.open_deep_research.state import ResearchComplete
-from src.app.agents.tools.search_tool import get_search_tool
-from src.app.agents.tools.think_tool import think_tool
+from src.app.core.tools import get_search_tool
+from src.app.agents.open_deep_research.think_tool import think_tool
 
 
 def get_all_tools():

@@ -8,7 +8,7 @@ from src.app.agents.chatbot.agent_chatbot import (
     build_chatbot_trace_output,
     chatbot_model,
 )
-from src.app.agents.tools import tools
+from src.app.core.tools import tools
 from src.app.core.common.config import settings
 from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
 from src.app.core.mcp.manager import McpManager

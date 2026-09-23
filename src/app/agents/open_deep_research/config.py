@@ -4,7 +4,7 @@ This package contains the Deep Research agent that conducts multi-step research
 using a supervisor-researcher architecture with LangGraph subgraphs.
 """
 
-from src.app.agents.tools.search_tool import SearchAPI
+from src.app.core.tools import SearchAPI
 from src.app.core.common.utils import get_api_key_for_model
 from src.app.core.llm.factory import make_chat_model
 

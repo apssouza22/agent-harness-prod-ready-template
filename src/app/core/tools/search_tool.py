@@ -4,7 +4,7 @@ from typing import List
 
 from langchain_core.tools import tool
 
-from src.app.agents.tools import duckduckgo_search_tool
+from src.app.core.tools import duckduckgo_search_tool
 import logging
 
 

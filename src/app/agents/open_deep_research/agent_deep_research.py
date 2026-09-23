@@ -38,7 +38,7 @@ from src.app.agents.open_deep_research.researcher_subgraph import ResearcherAgen
 from src.app.agents.open_deep_research.state import AgentState, AgentInputState, ConductResearch, ResearchComplete
 from src.app.agents.open_deep_research.supervisor_subgraph import SupervisorAgent
 from src.app.agents.open_deep_research.utils import get_all_tools
-from src.app.agents.tools.think_tool import think_tool
+from src.app.agents.open_deep_research.think_tool import think_tool
 from src.app.core.common.config import settings
 from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
