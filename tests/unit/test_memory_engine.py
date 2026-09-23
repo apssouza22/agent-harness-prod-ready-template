@@ -28,7 +28,7 @@ def engine() -> LongTermMemoryEngine:
 @pytest.mark.asyncio
 async def test_add_applies_update_action(engine: LongTermMemoryEngine) -> None:
     engine._extractor.extract_facts.return_value = ["Works at Acme Corp"]
-    engine._store.search.return_value = [
+    engine._store.search_vector.return_value = [
         MemoryRecord(id="mem-1", memory="Works at Old Corp", score=0.05, payload={"data": "Works at Old Corp"})
     ]
     engine._reconciler.reconcile.return_value = [
@@ -60,7 +60,7 @@ async def test_add_applies_update_action(engine: LongTermMemoryEngine) -> None:
 @pytest.mark.asyncio
 async def test_add_applies_delete_action(engine: LongTermMemoryEngine) -> None:
     engine._extractor.extract_facts.return_value = ["Dislikes cheese pizza"]
-    engine._store.search.return_value = [
+    engine._store.search_vector.return_value = [
         MemoryRecord(id="mem-2", memory="Loves cheese pizza", score=0.04, payload={"data": "Loves cheese pizza"})
     ]
     engine._reconciler.reconcile.return_value = [
@@ -79,7 +79,7 @@ async def test_add_applies_delete_action(engine: LongTermMemoryEngine) -> None:
 @pytest.mark.asyncio
 async def test_add_falls_back_to_add_when_reconcile_returns_empty(engine: LongTermMemoryEngine) -> None:
     engine._extractor.extract_facts.return_value = ["Uses Vim"]
-    engine._store.search.return_value = []
+    engine._store.search_vector.return_value = []
     engine._reconciler.reconcile.return_value = []
 
     result = await engine.add(
@@ -93,12 +93,15 @@ async def test_add_falls_back_to_add_when_reconcile_returns_empty(engine: LongTe
 
 
 @pytest.mark.asyncio
-async def test_search_applies_entity_boost(engine: LongTermMemoryEngine) -> None:
+async def test_search_applies_hybrid_entity_boost(engine: LongTermMemoryEngine) -> None:
     engine._settings.LONG_TERM_MEMORY_ENTITY_BOOST_ENABLED = True
+    engine._settings.LONG_TERM_MEMORY_KEYWORD_SEARCH_ENABLED = True
     engine._settings.LONG_TERM_MEMORY_SEARCH_LIMIT = 1
     engine._settings.LONG_TERM_MEMORY_ENTITY_SEARCH_POOL_MULTIPLIER = 2
-    engine._settings.LONG_TERM_MEMORY_ENTITY_BOOST_WEIGHT = 0.15
-    engine._store.search.return_value = [
+    engine._settings.LONG_TERM_MEMORY_HYBRID_VECTOR_WEIGHT = 0.55
+    engine._settings.LONG_TERM_MEMORY_HYBRID_KEYWORD_WEIGHT = 0.30
+    engine._settings.LONG_TERM_MEMORY_HYBRID_ENTITY_WEIGHT = 0.15
+    engine._store.search_vector.return_value = [
         MemoryRecord(id="1", memory="Uses Rust daily", score=0.10, payload={}),
         MemoryRecord(
             id="2",
@@ -107,10 +110,15 @@ async def test_search_applies_entity_boost(engine: LongTermMemoryEngine) -> None
             payload={"entities": [{"name": "Acme Corp", "type": "organization"}]},
         ),
     ]
+    engine._store.search_keyword.return_value = [
+        MemoryRecord(id="2", memory="Works at Acme Corp", score=0.80, payload={}),
+    ]
     engine._entity_store.list_user_entities.return_value = ["acme corp", "rust"]
     engine._entity_store.get_entities_for_memories.return_value = {"2": {"acme corp"}}
 
     result = await engine.search(user_id="42", query="Tell me about Acme Corp")
 
+    engine._store.search_vector.assert_awaited_once()
+    engine._store.search_keyword.assert_awaited_once()
     assert result["results"][0]["id"] == "2"
     assert result["results"][0]["memory"] == "Works at Acme Corp"

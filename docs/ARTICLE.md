@@ -23,7 +23,7 @@ flowchart LR
   LangGraph --> MCP["MCP Servers"]
   Harness --> Bifrost["Bifrost Gateway\n(optional)"]
   Bifrost --> LLM["LLM Providers"]
-  Harness --> Memory["Long-Term Memory\n(mem0 + pgvector)"]
+  Harness --> Memory["Long-Term Memory\n(local pgvector)"]
   Harness --> Checkpoint["State Persistence\n(AsyncPostgresSaver)"]
   Harness --> Langfuse["Observability\n(Langfuse)"]
   FastAPI --> Prometheus
@@ -53,7 +53,7 @@ src/
 │       ├── middleware/      # Agent harness (AgentPipeline, logging, errors)
 │       ├── guardrails/      # Input/output safety (+ GuardrailMiddleware)
 │       ├── context/         # Context overflow prevention (+ summarization/trim middleware)
-│       ├── memory/          # Long-term memory (mem0) (+ MemoryMiddleware)
+│       ├── memory/          # Long-term memory (pgvector + hybrid search) (+ MemoryMiddleware)
 │       ├── checkpoint/      # State persistence
 │       ├── mcp/             # MCP manager, factory, shared HTTP pool, tool helpers
 │       ├── metrics/         # Prometheus definitions (+ LlmMetricsMiddleware)
@@ -412,7 +412,7 @@ async def agent_invoke(self, messages, session_id, user_id=None):
 | `LoggingMiddleware` | `middleware/` | invoke, model, tool | Structured `structlog` events at each boundary |
 | `ErrorHandlingMiddleware` | `middleware/` | `on_error` | LLM error metrics; re-raise in dev, empty result in prod |
 | `LlmMetricsMiddleware` | `metrics/` | `before_model_call`, `after_model_call` | Prometheus inference duration and token usage |
-| `MemoryMiddleware` | `memory/` | `before_invoke`, `after_invoke` | mem0 retrieval before run, background update after |
+| `MemoryMiddleware` | `memory/` | `before_invoke`, `after_invoke` | Hybrid retrieval before run, background reconcile/update after |
 | `GuardrailMiddleware` | `guardrails/` | `before_invoke`, `after_invoke` | Content filter, DeBERTa prompt-injection model, PII block/redact, safety check |
 | `SummarizationMiddleware` | `context/` | `before_model_call` | Calls `summarize_if_too_long` before each LLM call |
 | `TrimLongMessagesMiddleware` | `context/` | `before_model_call` | LangChain `trim_messages` with a "last" strategy |
@@ -601,25 +601,34 @@ The output guardrail fails open: if the safety model throws, the answer still go
 
 ---
 
-## 5. Long-term memory (mem0 + pgvector)
+## 5. Long-term memory (local pgvector + hybrid search)
 
-Per-user semantic memory sits in pgvector. Each invoke pulls similar memories first, then (after the run) extracts new ones from the conversation. In agents that use `AgentPipeline`, [`MemoryMiddleware`](../src/app/core/memory/middleware.py) handles both sides:
+Per-user long-term memory is stored in PostgreSQL with pgvector. The harness owns the full pipeline—no external memory SDK. Each invoke retrieves relevant memories first; after the run, it extracts facts, reconciles them against existing records (ADD / UPDATE / DELETE), and persists changes in the background.
+
+[`MemoryMiddleware`](../src/app/core/memory/middleware.py) wires retrieval and updates into the agent pipeline:
 
 ```python
 class MemoryMiddleware(AgentMiddleware):
-    async def before_invoke(self, ctx: AgentContext):
+    async def before_invoke(self, ctx: AgentContext) -> Optional[InvokeResult]:
+        if not settings.LONG_TERM_MEMORY_ENABLED:
+            return None
+        memory = self._get_memory()
         if ctx.messages:
-            memory = await get_relevant_memory(ctx.user_id, ctx.messages[-1].content)
-            ctx.metadata["long_term_memory"] = memory or "No relevant memory found."
+            retrieved = await memory.search(ctx.user_id, ctx.messages[-1].content)
+            ctx.metadata["long_term_memory"] = retrieved or "No relevant memory found."
         return None
 
-    async def after_invoke(self, ctx: AgentContext, result: InvokeResult):
+    async def after_invoke(self, ctx: AgentContext, result: InvokeResult) -> InvokeResult:
+        if not settings.LONG_TERM_MEMORY_ENABLED:
+            return result
+        memory = self._get_memory()
         if result:
             messages_dict = [dict(role=m.role, content=str(m.content)) for m in result]
-            bg_update_memory(ctx.user_id, messages_dict, {
-                "session_id": ctx.session_id,
-                "agent_name": ctx.agent_name,
-            })
+            memory.schedule_add(
+                ctx.user_id,
+                messages_dict,
+                {"session_id": ctx.session_id, "agent_name": ctx.agent_name, "user_id": ctx.user_id},
+            )
         return result
 ```
 
@@ -633,19 +642,98 @@ async def _core_invoke(self, ctx: AgentContext):
     # ... process and return messages ...
 ```
 
-Under the hood, retrieval and storage use mem0 against pgvector:
+### Architecture
 
-The memory singleton connects to pgvector using the same PostgreSQL instance as the rest of the application, configured through the shared `Settings` class. When Bifrost is enabled, mem0's OpenAI provider is pointed at the gateway's `/v1` endpoint so memory extraction and embedding calls are governed the same way as chat models.
+`MemoryService` is the public façade; [`LongTermMemoryEngine`](../src/app/core/memory/engine.py) orchestrates storage and retrieval:
+
+| Module | Role |
+|---|---|
+| `FactExtractor` | LLM JSON extraction of durable user facts from conversation |
+| `MemoryReconciler` | Compares new facts with similar existing memories → ADD / UPDATE / DELETE / NONE |
+| `EntityExtractor` + `EntityLinkStore` | Extracts people/orgs/projects/tools; parallel `{collection}_entity_links` index |
+| `PgVectorMemoryStore` | pgvector CRUD, `search_text` tsvector column, HNSW index |
+| `MemoryEmbedder` | OpenAI or Bedrock embeddings (Bifrost-aware for OpenAI) |
+| `search_ranker` | Fuses vector, keyword, and entity signals into a final ranking |
+
+```mermaid
+flowchart TB
+  subgraph ingest [Background ingest after invoke]
+    Messages --> FactExtract[FactExtractor]
+    FactExtract --> Reconcile[MemoryReconciler]
+    Reconcile --> Actions[ADD / UPDATE / DELETE]
+    Actions --> PG[(pgvector + entity_links)]
+    Actions --> EntityExtract[EntityExtractor]
+    EntityExtract --> PG
+  end
+
+  subgraph retrieve [Retrieval before invoke]
+    Query --> Vector[search_vector]
+    Query --> Keyword[search_keyword ts_rank_cd]
+    Query --> Entities[entity overlap]
+    Vector --> Fuse[fuse_hybrid_search_results]
+    Keyword --> Fuse
+    Entities --> Fuse
+    Fuse --> Prompt["long_term_memory in system prompt"]
+  end
+```
+
+### Multi-signal retrieval
+
+Search runs three complementary signals and fuses them with weighted normalized scores (higher is better):
+
+```
+score = (vector_weight × vector_similarity)
+      + (keyword_weight × normalized_ts_rank)
+      + (entity_weight × entity_overlap)
+```
+
+| Signal | Implementation | Default weight |
+|---|---|---|
+| **Vector** | pgvector cosine distance (`<=>`) with HNSW index | 0.55 |
+| **Keyword** | Postgres full-text search: `websearch_to_tsquery` + `ts_rank_cd` on a `search_text tsvector` column (BM25-like cover density) | 0.30 |
+| **Entity** | Overlap between query-matched user entities and memory-linked entities | 0.15 |
+
+Keyword search helps when exact terms matter (project names, product ids, people). Entity linking boosts memories tied to the same people, organizations, or tools mentioned in the query. Vector search still carries semantic recall when wording differs.
+
+### Ingest and stale-data handling
+
+Background updates follow a reconcile-then-apply flow:
+
+1. **Extract facts** — LLM returns `{"facts": [...]}` from the conversation (user messages only by default).
+2. **Find candidates** — embed each fact and search similar existing memories for the user.
+3. **Reconcile** — a second LLM call decides ADD, UPDATE, DELETE, or NONE per fact (handles job changes, preference reversals, contradictions).
+4. **Apply** — mutate pgvector rows and sync entity links; DELETE removes stale rows outright.
+5. **Fallback** — if reconciliation fails, facts are ADDed so nothing is silently dropped.
+
+Updates refresh both the embedding vector and the `search_text` tsvector (memory text + entity names).
+
+### Configuration
+
+Key settings in `Settings` (see `.env.example`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LONG_TERM_MEMORY_ENABLED` | `true` | Toggle memory middleware |
+| `LONG_TERM_MEMORY_MODEL` | `gpt-5-nano` | LLM for fact extraction and reconciliation |
+| `LONG_TERM_MEMORY_EMBEDDER_MODEL` | `text-embedding-3-small` | Embedding model for vector search |
+| `LONG_TERM_MEMORY_COLLECTION_NAME` | `longterm_memory` | pgvector table name |
+| `LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS` | optional | Extra guidelines for fact extraction |
+| `LONG_TERM_MEMORY_KEYWORD_SEARCH_ENABLED` | `true` | Toggle keyword/BM25-like signal |
+| `LONG_TERM_MEMORY_ENTITY_BOOST_ENABLED` | `true` | Toggle entity overlap signal |
+| `LONG_TERM_MEMORY_HYBRID_VECTOR_WEIGHT` | `0.55` | Vector fusion weight |
+| `LONG_TERM_MEMORY_HYBRID_KEYWORD_WEIGHT` | `0.30` | Keyword fusion weight |
+| `LONG_TERM_MEMORY_HYBRID_ENTITY_WEIGHT` | `0.15` | Entity fusion weight |
+
+When Bifrost is enabled, `MemoryEmbedder` routes OpenAI embedding calls through the gateway's `/v1` endpoint; fact extraction and reconciliation use the shared LLM factory like other agents.
 
 ```python
-async def get_relevant_memory(user_id: int, query: str) -> str:
-    memory = await get_memory_instance()
-    results = await memory.search(user_id=str(user_id), query=query)
-    return "\n".join([f"* {result['memory']}" for result in results["results"]])
-
-def bg_update_memory(user_id: int, messages: list[dict], metadata: dict = None) -> None:
-    asyncio.create_task(update_memory(user_id, messages, metadata))
+# MemoryService API (used by middleware and FastAPI DI)
+async def search(self, user_id: int, query: str) -> str: ...
+async def add(self, user_id: int, messages: list[dict], metadata: dict | None = None) -> None: ...
+def schedule_add(self, user_id: int, messages: list[dict], metadata: dict | None = None) -> None: ...
 ```
+
+Memory updates are scheduled with `asyncio.create_task` so they never block the HTTP response.
 
 ---
 
@@ -1124,9 +1212,9 @@ make eval-no-report    # Skip report generation
 
 ## 13. Bifrost API gateway (optional)
 
-[Bifrost](https://docs.getbifrost.ai/integrations/langchain-sdk) is an AI gateway that sits between the harness and upstream LLM providers. When enabled, every model call—chatbot, deep research, text-to-SQL, safety evaluation, mem0 memory, and the evaluation judge—routes through Bifrost instead of hitting provider APIs directly.
+[Bifrost](https://docs.getbifrost.ai/integrations/langchain-sdk) is an AI gateway that sits between the harness and upstream LLM providers. When enabled, every model call—chatbot, deep research, text-to-SQL, safety evaluation, memory extraction/embeddings, and the evaluation judge—routes through Bifrost instead of hitting provider APIs directly.
 
-That buys you a single place to manage API keys, switch models, enforce budgets, add semantic caching, and attach governance headers without touching agent code. The integration is a drop-in proxy: LangChain clients point at Bifrost's `/langchain` endpoint; OpenAI SDK clients (mem0, evals) use `/v1`.
+That buys you a single place to manage API keys, switch models, enforce budgets, add semantic caching, and attach governance headers without touching agent code. The integration is a drop-in proxy: LangChain clients point at Bifrost's `/langchain` endpoint; OpenAI SDK clients and OpenAI-compatible embedding clients use `/v1`.
 
 ### Centralized LLM factory
 
@@ -1167,7 +1255,7 @@ With Bifrost off (the default), behavior is unchanged: models talk to providers 
 |---|---|---|
 | Chatbot, deep research, safety model | `create_chat_model()` | `/langchain` |
 | Text-to-SQL (`ChatOpenAI`) | `create_openai_chat_model()` | `/langchain` |
-| mem0 memory + embeddings | `build_mem0_openai_config()` | `/v1` |
+| Memory extraction + embeddings | `MemoryEmbedder` / LLM factory | `/v1` (embeddings), `/langchain` (LLM) |
 | Evaluation judge (`AsyncOpenAI`) | `build_openai_client_kwargs()` | `/v1` |
 
 ### Configuration
@@ -1405,7 +1493,7 @@ my_model = create_chat_model(model=f"openai:{settings.DEFAULT_LLM_MODEL}")
 | Input guardrails | Content filter, regex + DeBERTa injection detection, PII block |
 | Output guardrails | Redaction modes, small safety model |
 | Agent middleware | `AgentPipeline` / `AgentMiddleware`; invoke + model/tool hooks; [section 3](./ARTICLE.md#3-agent-middleware), [walkthrough](./middleware-for-agent-harness.md) |
-| Long-term memory | mem0 + pgvector via `MemoryMiddleware`, per user, async update |
+| Long-term memory | Local pgvector + hybrid search (vector, keyword, entity) via `MemoryMiddleware`; ADD/UPDATE/DELETE reconciliation; per user, async update |
 | Context | Tool eviction to disk; `SummarizationMiddleware` + `TrimLongMessagesMiddleware` on `before_model_call` |
 | State | `AsyncPostgresSaver`, thread id = session |
 | Observability | Langfuse, Prometheus, structlog |

@@ -13,7 +13,7 @@ from src.app.core.memory.entity_extractor import EntityExtractor
 from src.app.core.memory.entity_store import EntityLinkStore
 from src.app.core.memory.extractor import FactExtractor
 from src.app.core.memory.reconciler import MemoryAction, MemoryReconciler
-from src.app.core.memory.search_ranker import rank_records_with_entity_boost
+from src.app.core.memory.search_ranker import fuse_hybrid_search_results, rank_records_with_entity_boost
 from src.app.core.memory.vector_store import MemoryRecord, PgVectorMemoryStore
 
 
@@ -43,22 +43,33 @@ class LongTermMemoryEngine:
         await self.initialize()
 
         search_limit = self._settings.LONG_TERM_MEMORY_SEARCH_LIMIT
-        pool_limit = search_limit
-        if self._settings.LONG_TERM_MEMORY_ENTITY_BOOST_ENABLED:
-            pool_limit = max(
-                search_limit,
-                search_limit * self._settings.LONG_TERM_MEMORY_ENTITY_SEARCH_POOL_MULTIPLIER,
-            )
+        pool_limit = max(
+            search_limit,
+            search_limit * self._settings.LONG_TERM_MEMORY_ENTITY_SEARCH_POOL_MULTIPLIER,
+        )
 
         embedding = await self._embedder.embed(query)
-        records = await self._store.search(
+        vector_records = await self._store.search_vector(
             embedding,
             filters={"user_id": user_id},
             limit=pool_limit,
         )
 
-        if self._settings.LONG_TERM_MEMORY_ENTITY_BOOST_ENABLED and records:
-            records = await self._rank_with_entity_boost(user_id, query, records, limit=search_limit)
+        keyword_records: list[MemoryRecord] = []
+        if self._settings.LONG_TERM_MEMORY_KEYWORD_SEARCH_ENABLED:
+            keyword_records = await self._store.search_keyword(
+                query,
+                filters={"user_id": user_id},
+                limit=pool_limit,
+            )
+
+        records = await self._fuse_search_results(
+            user_id=user_id,
+            query=query,
+            vector_records=vector_records,
+            keyword_records=keyword_records,
+            limit=search_limit,
+        )
 
         results = [
             {
@@ -66,44 +77,71 @@ class LongTermMemoryEngine:
                 "memory": record.memory,
                 "score": record.score,
             }
-            for record in records[:search_limit]
+            for record in records
             if record.memory
         ]
         return {"results": results}
 
-    async def _rank_with_entity_boost(
+    async def _fuse_search_results(
         self,
+        *,
         user_id: str,
         query: str,
-        records: list[MemoryRecord],
-        *,
+        vector_records: list[MemoryRecord],
+        keyword_records: list[MemoryRecord],
         limit: int,
     ) -> list[MemoryRecord]:
+        use_entity_signal = self._settings.LONG_TERM_MEMORY_ENTITY_BOOST_ENABLED
+        use_keyword_signal = self._settings.LONG_TERM_MEMORY_KEYWORD_SEARCH_ENABLED
+
+        if not use_keyword_signal and not use_entity_signal:
+            return vector_records[:limit]
+
+        if use_keyword_signal:
+            query_entities: set[str] = set()
+            memory_entities: dict[str, set[str]] = {}
+            if use_entity_signal:
+                known_entities = await self._entity_store.list_user_entities(user_id)
+                query_entities = match_query_entities(query, known_entities)
+                candidate_ids = [record.id for record in vector_records + keyword_records]
+                memory_entities = await self._entity_store.get_entities_for_memories(user_id, candidate_ids)
+                memory_entities = self._merge_payload_entities(vector_records + keyword_records, memory_entities)
+
+            ranked = fuse_hybrid_search_results(
+                vector_records,
+                keyword_records,
+                query_entities,
+                memory_entities,
+                vector_weight=self._settings.LONG_TERM_MEMORY_HYBRID_VECTOR_WEIGHT,
+                keyword_weight=self._settings.LONG_TERM_MEMORY_HYBRID_KEYWORD_WEIGHT,
+                entity_weight=self._settings.LONG_TERM_MEMORY_HYBRID_ENTITY_WEIGHT if use_entity_signal else 0.0,
+                rrf_k=self._settings.LONG_TERM_MEMORY_HYBRID_RRF_K,
+                limit=limit,
+            )
+            logger.debug(
+                "memory_hybrid_search_applied",
+                user_id=user_id,
+                vector_hits=len(vector_records),
+                keyword_hits=len(keyword_records),
+                query_entity_count=len(query_entities),
+                result_count=len(ranked),
+            )
+            return ranked
+
         known_entities = await self._entity_store.list_user_entities(user_id)
         query_entities = match_query_entities(query, known_entities)
-        if not query_entities:
-            return records[:limit]
-
         memory_entities = await self._entity_store.get_entities_for_memories(
             user_id,
-            [record.id for record in records],
+            [record.id for record in vector_records],
         )
-        memory_entities = self._merge_payload_entities(records, memory_entities)
-
-        ranked = rank_records_with_entity_boost(
-            records,
+        memory_entities = self._merge_payload_entities(vector_records, memory_entities)
+        return rank_records_with_entity_boost(
+            vector_records,
             query_entities,
             memory_entities,
             boost_weight=self._settings.LONG_TERM_MEMORY_ENTITY_BOOST_WEIGHT,
             limit=limit,
         )
-        logger.debug(
-            "memory_entity_boost_applied",
-            user_id=user_id,
-            query_entity_count=len(query_entities),
-            result_count=len(ranked),
-        )
-        return ranked
 
     @staticmethod
     def _merge_payload_entities(
@@ -175,7 +213,7 @@ class LongTermMemoryEngine:
 
         for fact in facts:
             embedding = await self._embedder.embed(fact)
-            similar = await self._store.search(
+            similar = await self._store.search_vector(
                 embedding,
                 filters={"user_id": user_id},
                 limit=self._settings.LONG_TERM_MEMORY_RECONCILE_CANDIDATE_LIMIT,

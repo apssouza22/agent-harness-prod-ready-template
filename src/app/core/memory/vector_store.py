@@ -29,17 +29,33 @@ class PgVectorMemoryStore:
         self._settings = app_settings
         self._collection_name = app_settings.LONG_TERM_MEMORY_COLLECTION_NAME
         self._dimensions = app_settings.LONG_TERM_MEMORY_EMBEDDING_DIMENSIONS
+        self._keyword_config = app_settings.LONG_TERM_MEMORY_KEYWORD_SEARCH_CONFIG
         self._initialized = False
 
     @staticmethod
     def _format_vector(values: list[float]) -> str:
         return "[" + ",".join(str(value) for value in values) + "]"
 
+    @staticmethod
+    def build_search_document(payload: dict[str, Any]) -> str:
+        """Build the text document indexed for keyword/BM25-like search."""
+        parts = [str(payload.get("data", "")).strip()]
+        entities = payload.get("entities", [])
+        if isinstance(entities, list):
+            for item in entities:
+                if isinstance(item, dict):
+                    name = str(item.get("name", "")).strip()
+                    if name:
+                        parts.append(name)
+                elif isinstance(item, str) and item.strip():
+                    parts.append(item.strip())
+        return " ".join(part for part in parts if part)
+
     async def _get_pool(self) -> AsyncConnectionPool | None:
         return await get_connection_pool(self._settings)
 
     async def initialize(self) -> None:
-        """Ensure pgvector extension, table, and index exist."""
+        """Ensure pgvector extension, table, and indexes exist."""
         if self._initialized:
             return
 
@@ -57,8 +73,15 @@ class PgVectorMemoryStore:
                     CREATE TABLE IF NOT EXISTS {table_name} (
                         id UUID PRIMARY KEY,
                         vector vector({self._dimensions}),
-                        payload JSONB NOT NULL
+                        payload JSONB NOT NULL,
+                        search_text TSVECTOR
                     )
+                    """
+                )
+                await cur.execute(
+                    f"""
+                    ALTER TABLE {table_name}
+                    ADD COLUMN IF NOT EXISTS search_text TSVECTOR
                     """
                 )
                 await cur.execute(
@@ -67,6 +90,21 @@ class PgVectorMemoryStore:
                     ON {table_name}
                     USING hnsw (vector vector_cosine_ops)
                     """
+                )
+                await cur.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS {table_name}_search_text_idx
+                    ON {table_name}
+                    USING GIN (search_text)
+                    """
+                )
+                await cur.execute(
+                    f"""
+                    UPDATE {table_name}
+                    SET search_text = to_tsvector(%s, coalesce(payload->>'data', ''))
+                    WHERE search_text IS NULL
+                    """,
+                    (self._keyword_config,),
                 )
 
         self._initialized = True
@@ -79,14 +117,21 @@ class PgVectorMemoryStore:
             raise RuntimeError("memory_connection_pool_unavailable")
 
         table_name = self._collection_name
+        search_document = self.build_search_document(payload)
         async with pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     f"""
-                    INSERT INTO {table_name} (id, vector, payload)
-                    VALUES (%s, %s::vector, %s)
+                    INSERT INTO {table_name} (id, vector, payload, search_text)
+                    VALUES (%s, %s::vector, %s, to_tsvector(%s, %s))
                     """,
-                    (UUID(memory_id), self._format_vector(vector), Json(payload)),
+                    (
+                        UUID(memory_id),
+                        self._format_vector(vector),
+                        Json(payload),
+                        self._keyword_config,
+                        search_document,
+                    ),
                 )
 
     async def search(
@@ -97,6 +142,16 @@ class PgVectorMemoryStore:
         limit: int,
     ) -> list[MemoryRecord]:
         """Search memories by cosine distance with JSON payload filters."""
+        return await self.search_vector(vector, filters=filters, limit=limit)
+
+    async def search_vector(
+        self,
+        vector: list[float],
+        *,
+        filters: dict[str, str],
+        limit: int,
+    ) -> list[MemoryRecord]:
+        """Search memories by pgvector cosine distance."""
         pool = await self._get_pool()
         if pool is None:
             return []
@@ -124,6 +179,59 @@ class PgVectorMemoryStore:
                 )
                 rows = await cur.fetchall()
 
+        return self._rows_to_records(rows, score_index=1)
+
+    async def search_keyword(
+        self,
+        query: str,
+        *,
+        filters: dict[str, str],
+        limit: int,
+    ) -> list[MemoryRecord]:
+        """Search memories using PostgreSQL BM25-like ranking via ts_rank_cd."""
+        cleaned_query = query.strip()
+        if not cleaned_query:
+            return []
+
+        pool = await self._get_pool()
+        if pool is None:
+            return []
+
+        filter_conditions: list[str] = ["search_text @@ websearch_to_tsquery(%s, %s)"]
+        filter_params: list[Any] = [self._keyword_config, cleaned_query]
+        for key, value in filters.items():
+            filter_conditions.append("payload->>%s = %s")
+            filter_params.extend([key, str(value)])
+
+        filter_clause = "WHERE " + " AND ".join(filter_conditions)
+        table_name = self._collection_name
+
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"""
+                    SELECT
+                        id,
+                        ts_rank_cd(search_text, websearch_to_tsquery(%s, %s)) AS rank,
+                        payload
+                    FROM {table_name}
+                    {filter_clause}
+                    ORDER BY rank DESC
+                    LIMIT %s
+                    """,
+                    (
+                        self._keyword_config,
+                        cleaned_query,
+                        *filter_params,
+                        limit,
+                    ),
+                )
+                rows = await cur.fetchall()
+
+        return self._rows_to_records(rows, score_index=1)
+
+    @staticmethod
+    def _rows_to_records(rows: list[tuple[Any, ...]], *, score_index: int) -> list[MemoryRecord]:
         results: list[MemoryRecord] = []
         for row in rows:
             payload = row[2] if isinstance(row[2], dict) else {}
@@ -131,7 +239,7 @@ class PgVectorMemoryStore:
                 MemoryRecord(
                     id=str(row[0]),
                     memory=str(payload.get("data", "")),
-                    score=float(row[1]),
+                    score=float(row[score_index]),
                     payload=payload,
                 )
             )
@@ -170,15 +278,24 @@ class PgVectorMemoryStore:
             raise RuntimeError("memory_connection_pool_unavailable")
 
         table_name = self._collection_name
+        search_document = self.build_search_document(payload)
         async with pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     f"""
                     UPDATE {table_name}
-                    SET vector = %s::vector, payload = %s
+                    SET vector = %s::vector,
+                        payload = %s,
+                        search_text = to_tsvector(%s, %s)
                     WHERE id = %s
                     """,
-                    (self._format_vector(vector), Json(payload), UUID(memory_id)),
+                    (
+                        self._format_vector(vector),
+                        Json(payload),
+                        self._keyword_config,
+                        search_document,
+                        UUID(memory_id),
+                    ),
                 )
 
     async def delete(self, memory_id: str) -> None:

@@ -209,6 +209,20 @@ class Settings:
         self.LONG_TERM_MEMORY_ENTITY_SEARCH_POOL_MULTIPLIER = int(
             os.getenv("LONG_TERM_MEMORY_ENTITY_SEARCH_POOL_MULTIPLIER", "3")
         )
+        self.LONG_TERM_MEMORY_KEYWORD_SEARCH_ENABLED = os.getenv(
+            "LONG_TERM_MEMORY_KEYWORD_SEARCH_ENABLED", "true"
+        ).lower() in ("true", "1", "t", "yes")
+        self.LONG_TERM_MEMORY_HYBRID_VECTOR_WEIGHT = float(
+            os.getenv("LONG_TERM_MEMORY_HYBRID_VECTOR_WEIGHT", "0.55")
+        )
+        self.LONG_TERM_MEMORY_HYBRID_KEYWORD_WEIGHT = float(
+            os.getenv("LONG_TERM_MEMORY_HYBRID_KEYWORD_WEIGHT", "0.30")
+        )
+        self.LONG_TERM_MEMORY_HYBRID_ENTITY_WEIGHT = float(
+            os.getenv("LONG_TERM_MEMORY_HYBRID_ENTITY_WEIGHT", "0.15")
+        )
+        self.LONG_TERM_MEMORY_HYBRID_RRF_K = int(os.getenv("LONG_TERM_MEMORY_HYBRID_RRF_K", "60"))
+        self.LONG_TERM_MEMORY_KEYWORD_SEARCH_CONFIG = os.getenv("LONG_TERM_MEMORY_KEYWORD_SEARCH_CONFIG", "simple")
 
         # Redis connection
         self.REDIS_HOST = os.getenv("REDIS_HOST", "localhost")

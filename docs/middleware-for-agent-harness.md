@@ -4,7 +4,7 @@ An agent harness is the glue between a language model and everything else: tools
 
 This doc is about agent middleware in this repo: a composable layer around invocations. It sits apart from the HTTP stack and from the raw LangGraph or Deep Agents graph. The idea matches what people call “agent middleware” in LangChain-style stacks: hooks around the loop, composable ordering, and room for both framework defaults and your own code. The harness runner (`AgentPipeline`, `MiddlewareManager`, logging, errors) lives in `src/app/core/middleware/`; domain middleware (guardrails, memory, metrics, context trimming) lives in the matching packages under `src/app/core/`. Examples refer to this tree, not generic tutorials.
 
-For the wider harness story (FastAPI, auth, checkpointing, mem0, Langfuse, MCP, and the rest), see [ARTICLE.md](./ARTICLE.md).
+For the wider harness story (FastAPI, auth, checkpointing, long-term memory, Langfuse, MCP, and the rest), see [ARTICLE.md](./ARTICLE.md).
 
 ---
 
