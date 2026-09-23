@@ -136,3 +136,61 @@ class PgVectorMemoryStore:
                 )
             )
         return results
+
+    async def get(self, memory_id: str) -> MemoryRecord | None:
+        """Fetch a single memory row by id."""
+        pool = await self._get_pool()
+        if pool is None:
+            return None
+
+        table_name = self._collection_name
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"SELECT id, vector, payload FROM {table_name} WHERE id = %s",
+                    (UUID(memory_id),),
+                )
+                row = await cur.fetchone()
+
+        if not row:
+            return None
+
+        payload = row[2] if isinstance(row[2], dict) else {}
+        return MemoryRecord(
+            id=str(row[0]),
+            memory=str(payload.get("data", "")),
+            score=0.0,
+            payload=payload,
+        )
+
+    async def update(self, memory_id: str, vector: list[float], payload: dict[str, Any]) -> None:
+        """Update an existing memory vector and payload."""
+        pool = await self._get_pool()
+        if pool is None:
+            raise RuntimeError("memory_connection_pool_unavailable")
+
+        table_name = self._collection_name
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"""
+                    UPDATE {table_name}
+                    SET vector = %s::vector, payload = %s
+                    WHERE id = %s
+                    """,
+                    (self._format_vector(vector), Json(payload), UUID(memory_id)),
+                )
+
+    async def delete(self, memory_id: str) -> None:
+        """Delete a memory row by id."""
+        pool = await self._get_pool()
+        if pool is None:
+            raise RuntimeError("memory_connection_pool_unavailable")
+
+        table_name = self._collection_name
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"DELETE FROM {table_name} WHERE id = %s",
+                    (UUID(memory_id),),
+                )

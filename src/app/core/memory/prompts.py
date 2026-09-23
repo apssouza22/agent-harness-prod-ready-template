@@ -52,3 +52,61 @@ def build_fact_extraction_prompt(custom_instructions: str | None = None) -> str:
         "Additional extraction guidelines from the application:\n"
         f"{custom_instructions.strip()}\n"
     )
+
+
+DEFAULT_MEMORY_RECONCILE_PROMPT = """You are a smart memory manager which controls the memory of a system.
+You can perform four operations: (1) add into the memory, (2) update the memory, (3) delete from the memory, and (4) no change.
+
+Compare newly retrieved facts with the existing memory. For each relevant item, decide whether to:
+- ADD: Add new information not present in memory
+- UPDATE: Replace an existing memory when the new fact supersedes or refines it
+- DELETE: Remove an existing memory when the new fact contradicts it or explicitly retracts it
+- NONE: Make no change when the information is already represented
+
+Guidelines:
+- UPDATE keeps the same memory id and replaces outdated text (for example job title or city changes).
+- DELETE removes contradicted facts (for example "dislikes pizza" vs "loves pizza").
+- NONE when the fact is semantically equivalent to an existing memory.
+- ADD only for genuinely new information.
+- Return JSON only.
+"""
+
+
+def build_memory_reconcile_prompt(
+    existing_memories: list[dict[str, str]],
+    new_facts: list[str],
+) -> str:
+    """Build the user prompt for reconciling new facts against existing memories."""
+    if existing_memories:
+        current_memory_part = (
+            "Below is the current content of memory which has been collected so far:\n\n"
+            f"{existing_memories}\n"
+        )
+    else:
+        current_memory_part = "Current memory is empty.\n"
+
+    facts_block = "\n".join(f"- {fact}" for fact in new_facts)
+    return f"""{DEFAULT_MEMORY_RECONCILE_PROMPT}
+
+{current_memory_part}
+
+The new retrieved facts are:
+{facts_block}
+
+Return your response in this JSON structure only:
+{{
+  "memory": [
+    {{
+      "id": "<existing id for UPDATE/DELETE/NONE, or a new id string for ADD>",
+      "text": "<content>",
+      "event": "ADD|UPDATE|DELETE|NONE",
+      "old_memory": "<previous content, required for UPDATE>"
+    }}
+  ]
+}}
+
+Rules:
+- Use only ids from the existing memory list for UPDATE, DELETE, and NONE.
+- Generate a new id string only for ADD events.
+- If current memory is empty, ADD all relevant new facts.
+"""
