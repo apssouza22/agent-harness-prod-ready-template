@@ -55,7 +55,6 @@ async def make_chatbot_agent(
             model_name=resolve_model_identifier(),
         ),
         TrimLongMessagesMiddleware(
-            llm=chatbot_model,
             max_tokens=settings.MAX_TOKENS,
         ),
     ]

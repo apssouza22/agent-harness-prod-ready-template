@@ -8,5 +8,8 @@ and other external integrations.
 from langchain_core.tools.base import BaseTool
 
 from .duckduckgo_search import duckduckgo_search_tool
+from .search_tool import SearchAPI, get_search_tool
 
 tools: list[BaseTool] = [duckduckgo_search_tool]
+
+__ALL__ = ["tools", "SearchAPI", "get_search_tool"]
