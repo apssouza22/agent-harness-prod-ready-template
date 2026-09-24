@@ -1,4 +1,8 @@
-"""Centralized LLM factory.
+"""Centralized LLM factory with optional Bifrost API gateway routing.
+
+When BIFROST_ENABLED is true, LangChain chat models are pointed at the Bifrost
+/langchain proxy and OpenAI-compatible clients use the /v1 endpoint. Provider
+API keys are managed by Bifrost instead of the application.
 
 When DEFAULT_LLM_PROVIDER=bedrock, models route through langchain-aws
 ChatBedrockConverse using AWS credentials instead of API keys.
@@ -14,6 +18,8 @@ from src.app.core.common.logging import logger
 
 
 settings = default_settings
+
+BifrostAgent = Literal["agent_1", "agent_2"]
 
 OPENAI_ONLY_KWARGS = frozenset({"reasoning"})
 BEDROCK_UNSUPPORTED_INFERENCE_KWARGS = frozenset({"temperature", "top_p"})
@@ -35,6 +41,44 @@ BEDROCK_REGIONAL_PREFIXES = (
 
 def _resolve_settings(app_settings: Settings | None = None) -> Settings:
     return app_settings or settings
+
+
+def resolve_bifrost_virtual_key(
+    *,
+    bifrost_agent: BifrostAgent | None = None,
+    app_settings: Settings | None = None,
+) -> str:
+    """Resolve the Bifrost virtual key for an agent tier or global fallback."""
+    resolved_settings = _resolve_settings(app_settings)
+    if bifrost_agent == "agent_1" and resolved_settings.BIFROST_API_KEY_AGENT_1:
+        return resolved_settings.BIFROST_API_KEY_AGENT_1
+    if bifrost_agent == "agent_2" and resolved_settings.BIFROST_API_KEY_AGENT_2:
+        return resolved_settings.BIFROST_API_KEY_AGENT_2
+    return resolved_settings.BIFROST_VIRTUAL_KEY or ""
+
+
+def get_bifrost_langchain_base_url(app_settings: Settings | None = None) -> str:
+    """Return the Bifrost LangChain proxy base URL."""
+    resolved_settings = _resolve_settings(app_settings)
+    return resolved_settings.BIFROST_BASE_URL.rstrip("/")
+
+
+def get_bifrost_openai_base_url(app_settings: Settings | None = None) -> str:
+    """Return the Bifrost OpenAI-compatible base URL for direct OpenAI clients."""
+    resolved_settings = _resolve_settings(app_settings)
+    return resolved_settings.BIFROST_OPENAI_BASE_URL.rstrip("/")
+
+
+def get_bifrost_default_headers(
+    app_settings: Settings | None = None,
+    *,
+    bifrost_agent: BifrostAgent | None = None,
+) -> dict[str, str]:
+    """Return optional Bifrost governance headers (e.g. virtual key)."""
+    virtual_key = resolve_bifrost_virtual_key(bifrost_agent=bifrost_agent, app_settings=app_settings)
+    if not virtual_key:
+        return {}
+    return {"x-bf-vk": virtual_key}
 
 
 def _parse_model_provider(model_name: str) -> str | None:
@@ -173,6 +217,8 @@ def filter_provider_kwargs(model_name: str, kwargs: dict[str, Any]) -> dict[str,
 def resolve_api_key_for_model(model_name: str | None = None, app_settings: Settings | None = None) -> str:
     """Resolve the API key to pass to LangChain for the given model."""
     resolved_settings = _resolve_settings(app_settings)
+    if resolved_settings.BIFROST_ENABLED:
+        return resolved_settings.BIFROST_API_KEY
 
     if model_name:
         normalized = model_name.lower()
@@ -190,6 +236,8 @@ def resolve_api_key_for_model(model_name: str | None = None, app_settings: Setti
 
 def build_chat_model_kwargs(
     app_settings: Settings | None = None,
+    *,
+    bifrost_agent: BifrostAgent | None = None,
     **overrides: Any,
 ) -> dict[str, Any]:
     """Build kwargs for LangChain chat model initialization."""
@@ -201,6 +249,23 @@ def build_chat_model_kwargs(
         model_name = _normalize_bedrock_model_identifier(model_name)
         kwargs["model"] = model_name
     provider = _parse_model_provider(model_name)
+
+    if resolved_settings.BIFROST_ENABLED:
+        kwargs["base_url"] = get_bifrost_langchain_base_url(resolved_settings)
+        kwargs["api_key"] = resolved_settings.BIFROST_API_KEY
+        bifrost_headers = get_bifrost_default_headers(resolved_settings, bifrost_agent=bifrost_agent)
+        if bifrost_headers:
+            existing_headers = kwargs.get("default_headers", {})
+            kwargs["default_headers"] = {**existing_headers, **bifrost_headers}
+        logger.debug(
+            "bifrost_chat_model_routing_enabled",
+            base_url=kwargs["base_url"],
+            bifrost_agent=bifrost_agent,
+            has_virtual_key=bool(
+                resolve_bifrost_virtual_key(bifrost_agent=bifrost_agent, app_settings=resolved_settings)
+            ),
+        )
+        return filter_provider_kwargs(model_name, kwargs)
 
     if provider in {BEDROCK_LEGACY_PREFIX, BEDROCK_CONVERSE_PREFIX}:
         kwargs.update(build_bedrock_client_kwargs(resolved_settings))
@@ -227,6 +292,7 @@ def make_chat_model(
     fallbacks: list[str] | None = None,
     *,
     app_settings: Settings | None = None,
+    bifrost_agent: BifrostAgent | None = None,
     configurable_fields: Literal["any"] | list[str] | tuple[str, ...] | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
@@ -241,6 +307,7 @@ def make_chat_model(
         model: Provider-prefixed model identifier passed to ``init_chat_model``.
         fallbacks: Optional list of fallback model identifiers.
         app_settings: Optional settings override for provider routing and API keys.
+        bifrost_agent: Optional Bifrost agent tier for per-agent virtual keys.
         configurable_fields: Optional fields to make runtime-configurable.
         **kwargs: Additional kwargs forwarded to ``init_chat_model``.
 
@@ -249,6 +316,7 @@ def make_chat_model(
     """
     model_kwargs = build_chat_model_kwargs(
         app_settings,
+        bifrost_agent=bifrost_agent,
         model=model,
         **kwargs,
     )
@@ -264,6 +332,7 @@ def make_chat_model(
         make_chat_model(
             fallback_model,
             app_settings=app_settings,
+            bifrost_agent=bifrost_agent,
             **kwargs,
         )
         for fallback_model in fallbacks
@@ -273,13 +342,38 @@ def make_chat_model(
 
 def build_openai_client_kwargs(
     app_settings: Settings | None = None,
+    *,
+    bifrost_agent: BifrostAgent | None = None,
     **overrides: Any,
 ) -> dict[str, Any]:
     """Build kwargs for OpenAI SDK clients (evaluations, etc.)."""
     resolved_settings = _resolve_settings(app_settings)
+    if resolved_settings.BIFROST_ENABLED:
+        virtual_key = resolve_bifrost_virtual_key(bifrost_agent=bifrost_agent, app_settings=resolved_settings)
+        return {
+            "api_key": virtual_key or resolved_settings.BIFROST_API_KEY,
+            "base_url": get_bifrost_openai_base_url(resolved_settings),
+            **overrides,
+        }
+
     api_key = overrides.pop("api_key", resolved_settings.OPENAI_API_KEY)
     base_url = overrides.pop("base_url", None)
     client_kwargs: dict[str, Any] = {"api_key": api_key, **overrides}
     if base_url:
         client_kwargs["base_url"] = base_url
     return client_kwargs
+
+
+def build_mem0_openai_config(
+    app_settings: Settings | None = None,
+    *,
+    bifrost_agent: BifrostAgent | None = None,
+) -> dict[str, Any]:
+    """Build mem0 OpenAI provider config with optional Bifrost routing."""
+    resolved_settings = _resolve_settings(app_settings)
+    config: dict[str, Any] = {}
+    if resolved_settings.BIFROST_ENABLED:
+        virtual_key = resolve_bifrost_virtual_key(bifrost_agent=bifrost_agent, app_settings=resolved_settings)
+        config["api_key"] = virtual_key or resolved_settings.BIFROST_API_KEY
+        config["openai_base_url"] = get_bifrost_openai_base_url(resolved_settings)
+    return config

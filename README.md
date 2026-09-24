@@ -325,10 +325,10 @@ Full API docs available at `/docs` (Swagger) and `/redoc` when the application i
 
 ```bash
 # Register and chat
-python src/cli/api_client.py --email user@example.com --password YourPass123 --register
+python src/cli/api_client.py --email user@example.com --password Your@Pass123 --register
 
 # Login and chat
-python src/cli/api_client.py --email user@example.com --password YourPass123
+python src/cli/api_client.py --email user@example.com --password Your@Pass123
 
 # With custom message
 python src/cli/api_client.py --email user@example.com --password YourPass123 --message "What can you do?"

@@ -4,7 +4,6 @@ This module sets up and configures Prometheus metrics for monitoring the applica
 """
 
 from prometheus_client import Counter, Histogram, Gauge
-from starlette_prometheus import metrics, PrometheusMiddleware
 
 # Request metrics
 http_requests_total = Counter("http_requests_total", "Total number of HTTP requests", ["method", "endpoint", "status"])
