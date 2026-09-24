@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from psycopg.types.json import Json
 from psycopg_pool import AsyncConnectionPool
 
 from src.app.core.common.config import Settings
@@ -97,5 +98,5 @@ class DialogueStateStore:
                         state = EXCLUDED.state,
                         updated_at = EXCLUDED.updated_at
                     """,
-                    (session_id, user_id, payload, updated_at),
+                    (session_id, user_id, Json(payload), updated_at),
                 )

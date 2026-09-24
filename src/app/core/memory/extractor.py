@@ -56,6 +56,7 @@ class FactExtractor:
             model_name,
             app_settings=self._settings,
             max_tokens=self._settings.MAX_TOKENS,
+            bifrost_agent="agent_1",
             response_format={"type": "json_object"},
         )
 

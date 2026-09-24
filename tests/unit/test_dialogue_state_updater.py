@@ -46,12 +46,20 @@ async def test_update_state_parses_llm_json(updater: DialogueStateUpdater) -> No
     mock_llm = AsyncMock()
     mock_llm.ainvoke.return_value = mock_response
 
+    captured_kwargs: dict[str, object] = {}
+
+    def capture_make_chat_model(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return mock_llm
+
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
             "src.app.core.dialogue_state.updater.make_chat_model",
-            lambda *args, **kwargs: mock_llm,
+            capture_make_chat_model,
         )
         result = await updater.update_state(previous_state, messages)
+
+    assert captured_kwargs.get("bifrost_agent") == "agent_1"
 
     assert result.topic == "hotel booking"
     assert result.slots["destination"] == "Lisbon"

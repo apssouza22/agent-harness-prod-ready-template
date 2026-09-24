@@ -63,6 +63,7 @@ class DialogueStateUpdater:
         llm = make_chat_model(
             model_name,
             app_settings=self._settings,
+            bifrost_agent="agent_1",
             max_tokens=self._settings.MAX_TOKENS,
             response_format={"type": "json_object"},
         )
