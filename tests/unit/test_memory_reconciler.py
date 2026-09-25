@@ -11,7 +11,7 @@ from src.app.core.memory.reconciler import MemoryReconciler
 
 @pytest.fixture
 def reconciler() -> MemoryReconciler:
-    return MemoryReconciler(settings)
+    return MemoryReconciler(settings, chat_model=MagicMock())
 
 
 def test_parse_actions_maps_update_delete_and_add(reconciler: MemoryReconciler) -> None:
@@ -56,7 +56,7 @@ async def test_reconcile_without_existing_memories_adds_all_facts(reconciler: Me
 
 
 @pytest.mark.asyncio
-async def test_reconcile_forwards_bifrost_agent(reconciler: MemoryReconciler) -> None:
+async def test_reconcile_uses_injected_chat_model() -> None:
     payload = {
         "memory": [
             {"id": "0", "text": "Works at Acme Corp", "event": "UPDATE", "old_memory": "Works at Old Corp"},
@@ -66,24 +66,14 @@ async def test_reconcile_forwards_bifrost_agent(reconciler: MemoryReconciler) ->
     mock_response.content = json.dumps(payload)
     mock_llm = AsyncMock()
     mock_llm.ainvoke.return_value = mock_response
+    reconciler = MemoryReconciler(settings, chat_model=mock_llm)
 
-    captured_kwargs: dict[str, object] = {}
+    actions = await reconciler.reconcile(
+        [{"id": "0", "text": "Works at Old Corp"}],
+        ["Works at Acme Corp"],
+        id_mapping={"0": "uuid-0"},
+    )
 
-    def capture_make_chat_model(*args, **kwargs):
-        captured_kwargs.update(kwargs)
-        return mock_llm
-
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            "src.app.core.memory.reconciler.make_chat_model",
-            capture_make_chat_model,
-        )
-        actions = await reconciler.reconcile(
-            [{"id": "0", "text": "Works at Old Corp"}],
-            ["Works at Acme Corp"],
-            id_mapping={"0": "uuid-0"},
-        )
-
-    assert captured_kwargs.get("bifrost_agent") == "agent_1"
+    mock_llm.ainvoke.assert_awaited_once()
     assert len(actions) == 1
     assert actions[0].event == "UPDATE"

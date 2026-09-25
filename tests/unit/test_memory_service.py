@@ -1,6 +1,6 @@
 """Unit tests for MemoryService."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -9,7 +9,9 @@ from src.app.core.memory.memory import MemoryService
 
 @pytest.fixture
 def memory_service() -> MemoryService:
-    return MemoryService()
+    from src.app.core.common.config import settings
+
+    return MemoryService(settings, chat_model=MagicMock())
 
 
 @pytest.mark.asyncio
@@ -62,7 +64,7 @@ async def test_search_returns_empty_when_disabled(monkeypatch: pytest.MonkeyPatc
     from src.app.core.common import config as config_module
 
     disabled_settings = config_module.Settings()
-    service = MemoryService(disabled_settings)
+    service = MemoryService(disabled_settings, chat_model=MagicMock())
 
     result = await service.search(user_id=1, query="preferences")
 

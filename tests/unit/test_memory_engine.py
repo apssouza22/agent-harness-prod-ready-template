@@ -12,7 +12,7 @@ from src.app.core.memory.vector_store import MemoryRecord
 
 @pytest.fixture
 def engine() -> LongTermMemoryEngine:
-    engine = LongTermMemoryEngine(settings)
+    engine = LongTermMemoryEngine(settings, chat_model=MagicMock())
     engine._initialized = True
     engine._store = AsyncMock()
     engine._entity_store = AsyncMock()

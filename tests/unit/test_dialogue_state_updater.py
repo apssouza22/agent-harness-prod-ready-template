@@ -12,7 +12,7 @@ from src.app.core.dialogue_state.updater import DialogueStateUpdater
 def updater() -> DialogueStateUpdater:
     from src.app.core.common.config import settings
 
-    return DialogueStateUpdater(settings)
+    return DialogueStateUpdater(settings, chat_model=MagicMock())
 
 
 @pytest.mark.asyncio
@@ -27,7 +27,9 @@ async def test_update_state_returns_previous_state_for_empty_conversation(
 
 
 @pytest.mark.asyncio
-async def test_update_state_parses_llm_json(updater: DialogueStateUpdater) -> None:
+async def test_update_state_parses_llm_json() -> None:
+    from src.app.core.common.config import settings
+
     previous_state = DialogueState()
     messages = [{"role": "user", "content": "I need a hotel in Lisbon"}]
     updated_payload = {
@@ -40,8 +42,8 @@ async def test_update_state_parses_llm_json(updater: DialogueStateUpdater) -> No
         "summary": "User wants a hotel in Lisbon.",
     }
 
-    mock_structured_llm = AsyncMock()
-    mock_structured_llm.ainvoke.return_value = DialogueStateLLMOutput(
+    mock_chat_model = AsyncMock()
+    mock_chat_model.ainvoke.return_value = DialogueStateLLMOutput(
         topic=updated_payload["topic"],
         active_goals=updated_payload["active_goals"],
         slots=[DialogueSlot(key="destination", value="Lisbon")],
@@ -50,25 +52,11 @@ async def test_update_state_parses_llm_json(updater: DialogueStateUpdater) -> No
         conversation_phase=updated_payload["conversation_phase"],
         summary=updated_payload["summary"],
     )
-    mock_llm = MagicMock()
-    mock_llm.with_structured_output.return_value = mock_structured_llm
+    updater = DialogueStateUpdater(settings, chat_model=mock_chat_model)
 
-    captured_kwargs: dict[str, object] = {}
+    result = await updater.update_state(previous_state, messages)
 
-    def capture_make_chat_model(*args, **kwargs):
-        captured_kwargs.update(kwargs)
-        return mock_llm
-
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            "src.app.core.dialogue_state.updater.make_chat_model",
-            capture_make_chat_model,
-        )
-        result = await updater.update_state(previous_state, messages)
-
-    assert captured_kwargs.get("bifrost_agent") == "agent_1"
-    mock_llm.with_structured_output.assert_called_once_with(DialogueStateLLMOutput)
-
+    mock_chat_model.ainvoke.assert_awaited_once()
     assert result.topic == "hotel booking"
     assert result.slots["destination"] == "Lisbon"
     assert result.pending_clarifications == ["What dates?"]

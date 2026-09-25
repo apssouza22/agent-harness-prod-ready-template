@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from langchain_core.language_models.chat_models import BaseChatModel
+
 from src.app.core.common.config import Settings
 from src.app.core.dialogue_state.models import DialogueState
 from src.app.core.dialogue_state.store import DialogueStateStore
@@ -11,10 +13,10 @@ from src.app.core.dialogue_state.updater import DialogueStateUpdater
 class DialogueStateEngine:
     """Orchestrate dialogue state persistence and LLM updates."""
 
-    def __init__(self, app_settings: Settings) -> None:
+    def __init__(self, app_settings: Settings, chat_model: BaseChatModel) -> None:
         self._settings = app_settings
         self._store = DialogueStateStore(app_settings)
-        self._updater = DialogueStateUpdater(app_settings)
+        self._updater = DialogueStateUpdater(app_settings, chat_model=chat_model)
         self._initialized = False
 
     async def initialize(self) -> None:

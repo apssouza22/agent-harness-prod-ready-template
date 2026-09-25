@@ -12,7 +12,9 @@ from src.app.core.common import config as config_module
 from src.app.core.db.factory import make_database, make_database_fresh
 from src.app.core.llm import factory as llm_factory
 from src.app.core.dialogue_state.factory import make_dialogue_state_service, make_dialogue_state_service_fresh
+from src.app.core.dialogue_state.llm import make_dialogue_state_chat_model
 from src.app.core.memory.factory import make_memory_service, make_memory_service_fresh
+from src.app.core.memory.llm import make_memory_chat_model
 from src.app.core.session.factory import make_session_repository
 from src.app.core.langfuse.factory import make_langfuse_tracer
 from src.app.core.user.factory import make_user_repository
@@ -57,6 +59,27 @@ def test_make_memory_service_accepts_settings(test_settings):
     assert service._settings is test_settings
 
 
+def test_make_memory_service_injects_chat_model(test_settings):
+    mock_chat_model = MagicMock()
+    service = make_memory_service(test_settings, chat_model=mock_chat_model)
+
+    assert service._chat_model is mock_chat_model
+
+
+def test_make_memory_chat_model_forwards_bifrost_agent(test_settings):
+    captured_kwargs: dict[str, object] = {}
+
+    def capture_make_chat_model(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return MagicMock()
+
+    with patch("src.app.core.memory.llm.make_chat_model", side_effect=capture_make_chat_model):
+        make_memory_chat_model(test_settings)
+
+    assert captured_kwargs.get("bifrost_agent") == "agent_1"
+    assert captured_kwargs.get("response_format") == {"type": "json_object"}
+
+
 def test_make_memory_service_fresh_returns_new_instance(test_settings):
     first = make_memory_service_fresh(test_settings)
     second = make_memory_service_fresh(test_settings)
@@ -68,6 +91,29 @@ def test_make_dialogue_state_service_accepts_settings(test_settings):
     service = make_dialogue_state_service(test_settings)
 
     assert service._settings is test_settings
+
+
+def test_make_dialogue_state_service_injects_chat_model(test_settings):
+    mock_chat_model = MagicMock()
+    service = make_dialogue_state_service(test_settings, chat_model=mock_chat_model)
+
+    assert service._chat_model is mock_chat_model
+
+
+def test_make_dialogue_state_chat_model_forwards_bifrost_agent(test_settings):
+    captured_kwargs: dict[str, object] = {}
+    mock_base_model = MagicMock()
+    mock_base_model.with_structured_output.return_value = MagicMock()
+
+    def capture_make_chat_model(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return mock_base_model
+
+    with patch("src.app.core.dialogue_state.llm.make_chat_model", side_effect=capture_make_chat_model):
+        make_dialogue_state_chat_model(test_settings)
+
+    assert captured_kwargs.get("bifrost_agent") == "agent_1"
+    mock_base_model.with_structured_output.assert_called_once()
 
 
 def test_make_dialogue_state_service_fresh_returns_new_instance(test_settings):

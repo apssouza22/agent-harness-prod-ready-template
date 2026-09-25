@@ -3,17 +3,16 @@
 import json
 from typing import Any
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import logger
-from src.app.core.dialogue_state.config_builder import resolve_dialogue_state_provider
 from src.app.core.dialogue_state.models import DialogueState, DialogueStateLLMOutput
 from src.app.core.dialogue_state.prompts import (
     DEFAULT_DIALOGUE_STATE_UPDATE_PROMPT,
     build_dialogue_state_update_prompt,
 )
-from src.app.core.llm.factory import make_chat_model, resolve_model_identifier
 
 
 def _parse_messages_for_prompt(messages: list[dict[str, Any]]) -> str:
@@ -29,8 +28,9 @@ def _parse_messages_for_prompt(messages: list[dict[str, Any]]) -> str:
 class DialogueStateUpdater:
     """Merge conversation turns into structured dialogue state."""
 
-    def __init__(self, app_settings: Settings) -> None:
+    def __init__(self, app_settings: Settings, chat_model: BaseChatModel) -> None:
         self._settings = app_settings
+        self._chat_model = chat_model
 
     async def update_state(
         self,
@@ -42,27 +42,11 @@ class DialogueStateUpdater:
         if not conversation.strip():
             return previous_state
 
-        provider = resolve_dialogue_state_provider(
-            self._settings.DIALOGUE_STATE_LLM_PROVIDER,
-            self._settings.DIALOGUE_STATE_MODEL,
-            fallback_provider=self._settings.DEFAULT_LLM_PROVIDER,
-        )
-        model_name = resolve_model_identifier(
-            self._settings.DIALOGUE_STATE_MODEL,
-            provider,
-            self._settings,
-        )
-        llm = make_chat_model(
-            model_name,
-            app_settings=self._settings,
-            bifrost_agent="agent_1",
-            max_tokens=self._settings.MAX_TOKENS,
-        ).with_structured_output(DialogueStateLLMOutput)
         previous_state_json = json.dumps(previous_state.model_dump(), ensure_ascii=True)
         user_prompt = build_dialogue_state_update_prompt(previous_state_json, conversation)
 
         try:
-            updated_output = await llm.ainvoke(
+            updated_output = await self._chat_model.ainvoke(
                 [
                     SystemMessage(content=DEFAULT_DIALOGUE_STATE_UPDATE_PROMPT),
                     HumanMessage(content=user_prompt),

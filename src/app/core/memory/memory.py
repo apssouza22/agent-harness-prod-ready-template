@@ -7,7 +7,9 @@ including initialization, search, and updates using pgvector with LLM fact extra
 import asyncio
 from typing import Any, Optional
 
-from src.app.core.common.config import Settings, settings
+from langchain_core.language_models.chat_models import BaseChatModel
+
+from src.app.core.common.config import Settings
 from src.app.core.common.logging import logger
 from src.app.core.memory.engine import LongTermMemoryEngine
 
@@ -19,14 +21,19 @@ class MemoryService:
     searching and updating user memories.
     """
 
-    def __init__(self, app_settings: Settings | None = None) -> None:
-        self._settings = app_settings or settings
+    def __init__(
+        self,
+        app_settings: Settings,
+        chat_model: BaseChatModel,
+    ) -> None:
+        self._settings = app_settings
+        self._chat_model = chat_model
         self._engine: Optional[LongTermMemoryEngine] = None
 
     async def _get_engine(self) -> LongTermMemoryEngine:
         """Lazily initialize and return the long-term memory engine."""
         if self._engine is None:
-            self._engine = LongTermMemoryEngine(self._settings)
+            self._engine = LongTermMemoryEngine(self._settings, chat_model=self._chat_model)
             await self._engine.initialize()
             logger.info(
                 "long_term_memory_initialized",

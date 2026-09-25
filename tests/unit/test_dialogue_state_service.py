@@ -1,6 +1,6 @@
 """Unit tests for DialogueStateService."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -10,7 +10,9 @@ from src.app.core.dialogue_state.service import DialogueStateService
 
 @pytest.fixture
 def dialogue_state_service() -> DialogueStateService:
-    return DialogueStateService()
+    from src.app.core.common.config import settings
+
+    return DialogueStateService(settings, chat_model=MagicMock())
 
 
 @pytest.mark.asyncio

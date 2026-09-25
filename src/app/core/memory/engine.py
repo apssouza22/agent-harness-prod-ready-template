@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from langchain_core.language_models.chat_models import BaseChatModel
+
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import logger
 from src.app.core.memory.embedder import MemoryEmbedder
@@ -20,14 +22,14 @@ from src.app.core.memory.vector_store import MemoryRecord, PgVectorMemoryStore
 class LongTermMemoryEngine:
     """Extract facts, reconcile against existing memories, and persist changes in pgvector."""
 
-    def __init__(self, app_settings: Settings) -> None:
+    def __init__(self, app_settings: Settings, chat_model: BaseChatModel) -> None:
         self._settings = app_settings
         self._store = PgVectorMemoryStore(app_settings)
         self._entity_store = EntityLinkStore(app_settings)
         self._embedder = MemoryEmbedder(app_settings)
-        self._extractor = FactExtractor(app_settings)
-        self._entity_extractor = EntityExtractor(app_settings)
-        self._reconciler = MemoryReconciler(app_settings)
+        self._extractor = FactExtractor(app_settings, chat_model=chat_model)
+        self._entity_extractor = EntityExtractor(app_settings, chat_model=chat_model)
+        self._reconciler = MemoryReconciler(app_settings, chat_model=chat_model)
         self._initialized = False
 
     async def initialize(self) -> None:

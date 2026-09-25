@@ -3,7 +3,9 @@
 import asyncio
 from typing import Any, Optional
 
-from src.app.core.common.config import Settings, settings
+from langchain_core.language_models.chat_models import BaseChatModel
+
+from src.app.core.common.config import Settings
 from src.app.core.common.logging import logger
 from src.app.core.dialogue_state.engine import DialogueStateEngine
 
@@ -11,13 +13,18 @@ from src.app.core.dialogue_state.engine import DialogueStateEngine
 class DialogueStateService:
     """Service for session-scoped dialogue state operations."""
 
-    def __init__(self, app_settings: Settings | None = None) -> None:
-        self._settings = app_settings or settings
+    def __init__(
+        self,
+        app_settings: Settings,
+        chat_model: BaseChatModel,
+    ) -> None:
+        self._settings = app_settings
+        self._chat_model = chat_model
         self._engine: Optional[DialogueStateEngine] = None
 
     async def _get_engine(self) -> DialogueStateEngine:
         if self._engine is None:
-            self._engine = DialogueStateEngine(self._settings)
+            self._engine = DialogueStateEngine(self._settings, chat_model=self._chat_model)
             await self._engine.initialize()
             logger.info("dialogue_state_initialized", table_name=self._settings.DIALOGUE_STATE_TABLE_NAME)
         return self._engine

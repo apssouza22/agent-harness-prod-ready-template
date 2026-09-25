@@ -4,12 +4,11 @@ import json
 import re
 from typing import Any
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import logger
-from src.app.core.llm.factory import make_chat_model, resolve_model_identifier
-from src.app.core.memory.config_builder import resolve_memory_provider
 from src.app.core.memory.prompts import build_fact_extraction_prompt
 
 
@@ -33,8 +32,9 @@ def _parse_messages_for_prompt(messages: list[dict[str, Any]]) -> str:
 class FactExtractor:
     """Extract durable user facts from conversation messages."""
 
-    def __init__(self, app_settings: Settings) -> None:
+    def __init__(self, app_settings: Settings, chat_model: BaseChatModel) -> None:
         self._settings = app_settings
+        self._chat_model = chat_model
 
     async def extract_facts(self, messages: list[dict[str, Any]]) -> list[str]:
         """Return extracted fact strings from a conversation transcript."""
@@ -42,29 +42,11 @@ class FactExtractor:
         if not conversation.strip():
             return []
 
-        provider = resolve_memory_provider(
-            self._settings.LONG_TERM_MEMORY_LLM_PROVIDER,
-            self._settings.LONG_TERM_MEMORY_MODEL,
-            fallback_provider=self._settings.DEFAULT_LLM_PROVIDER,
-        )
-        model_name = resolve_model_identifier(
-            self._settings.LONG_TERM_MEMORY_MODEL,
-            provider,
-            self._settings,
-        )
-        llm = make_chat_model(
-            model_name,
-            app_settings=self._settings,
-            max_tokens=self._settings.MAX_TOKENS,
-            bifrost_agent="agent_1",
-            response_format={"type": "json_object"},
-        )
-
         system_prompt = build_fact_extraction_prompt(self._settings.LONG_TERM_MEMORY_CUSTOM_INSTRUCTIONS)
         user_prompt = f"Input:\n{conversation}\n\nOutput:"
 
         try:
-            response = await llm.ainvoke(
+            response = await self._chat_model.ainvoke(
                 [
                     SystemMessage(content=system_prompt),
                     HumanMessage(content=user_prompt),

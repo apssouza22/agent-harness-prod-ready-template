@@ -5,12 +5,11 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import logger
-from src.app.core.llm.factory import make_chat_model, resolve_model_identifier
-from src.app.core.memory.config_builder import resolve_memory_provider
 from src.app.core.memory.prompts import build_memory_reconcile_prompt
 
 MemoryEvent = Literal["ADD", "UPDATE", "DELETE", "NONE"]
@@ -37,8 +36,9 @@ def _strip_code_blocks(text: str) -> str:
 class MemoryReconciler:
     """Compare extracted facts with existing memories and choose ADD/UPDATE/DELETE/NONE."""
 
-    def __init__(self, app_settings: Settings) -> None:
+    def __init__(self, app_settings: Settings, chat_model: BaseChatModel) -> None:
         self._settings = app_settings
+        self._chat_model = chat_model
 
     async def reconcile(
         self,
@@ -54,27 +54,9 @@ class MemoryReconciler:
         if not existing_memories:
             return [MemoryAction(event="ADD", text=fact) for fact in new_facts]
 
-        provider = resolve_memory_provider(
-            self._settings.LONG_TERM_MEMORY_LLM_PROVIDER,
-            self._settings.LONG_TERM_MEMORY_MODEL,
-            fallback_provider=self._settings.DEFAULT_LLM_PROVIDER,
-        )
-        model_name = resolve_model_identifier(
-            self._settings.LONG_TERM_MEMORY_MODEL,
-            provider,
-            self._settings,
-        )
-        llm = make_chat_model(
-            model_name,
-            app_settings=self._settings,
-            bifrost_agent="agent_1",
-            max_tokens=self._settings.MAX_TOKENS,
-            response_format={"type": "json_object"},
-        )
-
         prompt = build_memory_reconcile_prompt(existing_memories, new_facts)
         try:
-            response = await llm.ainvoke(
+            response = await self._chat_model.ainvoke(
                 [
                     SystemMessage(content="You reconcile user long-term memory updates."),
                     HumanMessage(content=prompt),
