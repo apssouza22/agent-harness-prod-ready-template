@@ -35,8 +35,8 @@ from src.app.core.fault_tolerance import (
 from src.app.core.context import truncate_tool_call_if_too_long
 from src.app.core.mcp.manager import McpManager
 from src.app.core.mcp.mcp_utils import handle_mcp_tool_call
-from src.app.core.dialogue_state import dialogue_state_service
-from src.app.core.memory import memory_service
+from src.app.core.dialogue_state.service import DialogueStateService
+from src.app.core.memory.memory import MemoryService
 
 from src.app.core.llm.factory import make_chat_model, resolve_model_identifier
 
@@ -81,6 +81,8 @@ class AgentChatbot:
         tools: list[BaseTool],
         checkpointer: AsyncPostgresSaver,
         middlewares: Sequence[AgentMiddleware],
+        memory_service: MemoryService,
+        dialogue_state_service: DialogueStateService,
         mcp_manager: McpManager | None = None,
     ):
         self.name = name
@@ -88,6 +90,8 @@ class AgentChatbot:
         self.tools = tools
         self.tools_by_name = {tool.name: tool for tool in tools}
         self.mcp_tools_by_name: dict[str, BaseTool] = {}
+        self._memory_service = memory_service
+        self._dialogue_state_service = dialogue_state_service
         self._mcp_manager = mcp_manager
         self._graph: Optional[StateGraphCompiled] = None
         self._last_trace_id: Optional[str] = None
@@ -185,10 +189,10 @@ class AgentChatbot:
         """
         config = build_invoke_config(session_id, user_id, self.name)
         relevant_memory = (
-            await memory_service.search(user_id, messages[-1].content)
+            await self._memory_service.search(user_id, messages[-1].content)
         ) or "No relevant memory found."
         formatted_dialogue_state = (
-            await dialogue_state_service.get_formatted(session_id)
+            await self._dialogue_state_service.get_formatted(session_id)
         ) or "No structured dialogue state yet."
 
         try:
@@ -210,8 +214,8 @@ class AgentChatbot:
             state: StateSnapshot = await sync_to_async(self._graph.get_state)(config=config)
             if state.values and "messages" in state.values:
                 openai_messages = convert_to_openai_messages(state.values["messages"])
-                memory_service.schedule_add(user_id, openai_messages, config["metadata"])
-                dialogue_state_service.schedule_update(session_id, user_id, openai_messages)
+                self._memory_service.schedule_add(user_id, openai_messages, config["metadata"])
+                self._dialogue_state_service.schedule_update(session_id, user_id, openai_messages)
 
         except Exception as stream_error:
             record_llm_error(settings.DEFAULT_LLM_MODEL, self.name)

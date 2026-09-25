@@ -11,12 +11,14 @@ from src.app.core.common.config import settings
 from src.app.core.langfuse import LangfuseTracer, LangfuseTracingMiddleware
 from src.app.core.guardrails import GuardrailMiddleware
 from src.app.core.memory import MemoryMiddleware
+from src.app.core.memory.memory import MemoryService
 from src.app.core.metrics import LlmMetricsMiddleware
 from src.app.core.middleware import ErrorHandlingMiddleware, LoggingMiddleware
 
 
 async def make_deep_research_agent(
     checkpointer: AsyncPostgresSaver | None,
+    memory_service: MemoryService,
     langfuse_tracer: LangfuseTracer | None = None,
 ) -> DeepResearchAgent:
     """Create and compile a deep research agent.
@@ -40,8 +42,13 @@ async def make_deep_research_agent(
         GuardrailMiddleware(langfuse_tracer=langfuse_tracer),
         LlmMetricsMiddleware(),
         ErrorHandlingMiddleware(),
-        MemoryMiddleware(),
+        MemoryMiddleware(memory=memory_service),
     ]
-    agent = DeepResearchAgent("Deep Research", checkpointer, middlewares=middlewares)
+    agent = DeepResearchAgent(
+        "Deep Research",
+        checkpointer,
+        middlewares=middlewares,
+        memory_service=memory_service,
+    )
     await agent.compile()
     return agent

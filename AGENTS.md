@@ -34,6 +34,13 @@ This is a production-ready AI agent application built with:
 - Use dependency injection for services, database connections, and auth
 - All database operations must be async
 
+### Dependency Injection Rules
+- **One instance per service** — create services in `lifespan()` and store on `app.state`; never use module-level singletons
+- **Factories** — each service package exposes `make_<service>()` and `make_<service>_fresh()` (for tests); no `@lru_cache` on service factories
+- **FastAPI routes** — resolve services via `get_<service>()` + `<Service>Dep` typed aliases in `src/app/dependencies.py`
+- **Agents & middleware** — receive services via constructor/factory parameters; no lazy imports or global fallbacks
+- **Composition root** — only `main.py` `lifespan()` wires the full dependency graph onto `app.state`
+
 ## Code Style Conventions
 
 ### Python/FastAPI
@@ -60,6 +67,75 @@ This is a production-ready AI agent application built with:
 - Implement `AsyncPostgresSaver` for checkpointing and persistence
 - Use `Command` for controlling graph flow between nodes
 - Use llm.with_structured_output
+
+## Dependency Injection
+
+All shared services follow the same pattern. Reference implementation: `src/app/dependencies.py`.
+
+### Composition root (`main.py` lifespan)
+
+Create each service once at startup and attach it to `app.state`:
+
+```python
+memory_service = make_memory_service(settings)
+app.state.memory_service = memory_service
+
+app.state.chatbot_agent = await make_chatbot_agent(
+    checkpointer,
+    memory_service,
+    dialogue_state_service,
+    langfuse_tracer=langfuse_tracer,
+)
+```
+
+### Factory (`core/<domain>/factory.py`)
+
+- `make_<service>(app_settings: Settings | None = None)` — creates a new instance
+- `make_<service>_fresh(...)` — alias for tests that need isolation
+- Do **not** add `@lru_cache` or `make_<service>_cached()` for application services
+
+### FastAPI dependencies (`dependencies.py`)
+
+```python
+def get_memory_service(request: Request) -> MemoryService:
+    return request.app.state.memory_service
+
+MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]
+```
+
+Routes use `MemoryServiceDep` (or the matching `*Dep` alias), not direct imports of service instances.
+
+### Package `__init__.py`
+
+Export types, middleware classes, and factory functions only. **Do not** create module-level service instances:
+
+```python
+# ✅ Correct
+from src.app.core.memory.factory import make_memory_service
+from src.app.core.memory.memory import MemoryService
+
+# ❌ Wrong
+memory_service = make_memory_service_cached()
+```
+
+### Middleware & agents
+
+Inject dependencies at construction time in the agent factory:
+
+```python
+MemoryMiddleware(memory=memory_service),
+DialogueStateMiddleware(dialogue_state=dialogue_state_service),
+```
+
+Agents that bypass the middleware pipeline (e.g. streaming) must still receive the same injected instances via their constructor — never import a global service.
+
+### Adding a new service
+
+1. Create `core/<domain>/service.py` and `core/<domain>/factory.py`
+2. Wire in `lifespan()`: `app.state.<name> = make_<service>(settings)`
+3. Add `get_<service>()` and `<Service>Dep` to `dependencies.py`
+4. Pass the instance into any agent factories or middleware that need it
+5. Add factory unit tests in `tests/unit/test_di_factories.py`
 
 ## Database Operations
 - Use SQLModel for ORM models (combines SQLAlchemy + Pydantic)
@@ -122,6 +198,7 @@ This is a production-ready AI agent application built with:
 8. All imports must be at the top of files
 9. All database operations must be async
 10. All endpoints must have proper type hints and Pydantic models
+11. All shared services must be created in `lifespan()` and injected — never as module-level singletons
 
 ## Common Pitfalls to Avoid
 
@@ -134,6 +211,10 @@ This is a production-ready AI agent application built with:
 - ❌ Blocking I/O operations without async
 - ❌ Hardcoding secrets or API keys
 - ❌ Missing type hints on function signatures
+- ❌ Module-level service singletons (`service = make_*_cached()` in `__init__.py`)
+- ❌ Lazy-importing global services inside middleware or agents as a DI fallback
+- ❌ Using `@lru_cache` on service factories (use `app.state` as the single source of truth)
+- ❌ Importing service instances directly in routes instead of using `*Dep` from `dependencies.py`
 
 ## When Making Changes
 

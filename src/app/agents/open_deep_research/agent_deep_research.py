@@ -44,7 +44,7 @@ from src.app.core.common.graph_utils import process_messages
 from src.app.core.common.logging import logger
 from src.app.core.common.model.message import Message
 from src.app.core.llm.llm_utils import dump_messages, record_llm_error
-from src.app.core.memory import memory_service
+from src.app.core.memory.memory import MemoryService
 
 
 def build_deep_research_trace_metadata(ctx: AgentContext) -> dict[str, Any]:
@@ -80,9 +80,11 @@ class DeepResearchAgent:
         name: str,
         checkpointer: AsyncPostgresSaver,
         middlewares: Sequence[AgentMiddleware],
+        memory_service: MemoryService,
     ):
         self.name = name
         self.checkpointer = checkpointer
+        self._memory_service = memory_service
         self._graph: Optional[StateGraphCompiled] = None
         self._last_trace_id: Optional[str] = None
         self._pipeline = AgentPipeline(
@@ -185,7 +187,7 @@ class DeepResearchAgent:
 
             state: StateSnapshot = await sync_to_async(self._graph.get_state)(config=config)
             if state.values and "messages" in state.values:
-                memory_service.schedule_add(
+                self._memory_service.schedule_add(
                     user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"]
                 )
 

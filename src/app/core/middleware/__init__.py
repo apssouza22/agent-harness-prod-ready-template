@@ -12,7 +12,12 @@ Usage::
     from src.app.core.metrics import LlmMetricsMiddleware
 
     pipeline = AgentPipeline(
-        middlewares=[LoggingMiddleware(), LlmMetricsMiddleware(), ErrorHandlingMiddleware(), MemoryMiddleware()],
+        middlewares=[
+            LoggingMiddleware(),
+            LlmMetricsMiddleware(),
+            ErrorHandlingMiddleware(),
+            MemoryMiddleware(memory=memory_service),
+        ],
         invoke_fn=agent.core_invoke,
     )
     result = await pipeline.run(ctx)

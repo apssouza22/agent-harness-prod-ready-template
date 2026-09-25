@@ -11,6 +11,7 @@ from src.app.core.db.connection_pool import get_connection_pool, reset_connectio
 from src.app.core.common import config as config_module
 from src.app.core.db.factory import make_database, make_database_fresh
 from src.app.core.llm import factory as llm_factory
+from src.app.core.dialogue_state.factory import make_dialogue_state_service, make_dialogue_state_service_fresh
 from src.app.core.memory.factory import make_memory_service, make_memory_service_fresh
 from src.app.core.session.factory import make_session_repository
 from src.app.core.langfuse.factory import make_langfuse_tracer
@@ -56,9 +57,22 @@ def test_make_memory_service_accepts_settings(test_settings):
     assert service._settings is test_settings
 
 
-def test_make_memory_service_fresh_bypasses_cache(test_settings):
+def test_make_memory_service_fresh_returns_new_instance(test_settings):
     first = make_memory_service_fresh(test_settings)
     second = make_memory_service_fresh(test_settings)
+
+    assert first is not second
+
+
+def test_make_dialogue_state_service_accepts_settings(test_settings):
+    service = make_dialogue_state_service(test_settings)
+
+    assert service._settings is test_settings
+
+
+def test_make_dialogue_state_service_fresh_returns_new_instance(test_settings):
+    first = make_dialogue_state_service_fresh(test_settings)
+    second = make_dialogue_state_service_fresh(test_settings)
 
     assert first is not second
 

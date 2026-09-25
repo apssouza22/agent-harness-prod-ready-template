@@ -15,7 +15,9 @@ from src.app.core.mcp.manager import McpManager
 from src.app.core.context import SummarizationMiddleware, TrimLongMessagesMiddleware
 from src.app.core.guardrails import GuardrailMiddleware
 from src.app.core.dialogue_state import DialogueStateMiddleware
+from src.app.core.dialogue_state.service import DialogueStateService
 from src.app.core.memory import MemoryMiddleware
+from src.app.core.memory.memory import MemoryService
 from src.app.core.metrics import LlmMetricsMiddleware
 from src.app.core.llm.factory import resolve_model_identifier
 from src.app.core.middleware import ErrorHandlingMiddleware, LoggingMiddleware
@@ -23,6 +25,8 @@ from src.app.core.middleware import ErrorHandlingMiddleware, LoggingMiddleware
 
 async def make_chatbot_agent(
     checkpointer: AsyncPostgresSaver | None,
+    memory_service: MemoryService,
+    dialogue_state_service: DialogueStateService,
     langfuse_tracer: LangfuseTracer | None = None,
     mcp_manager: McpManager | None = None,
 ) -> AgentChatbot:
@@ -48,8 +52,8 @@ async def make_chatbot_agent(
         GuardrailMiddleware(langfuse_tracer=langfuse_tracer),
         LlmMetricsMiddleware(),
         ErrorHandlingMiddleware(),
-        MemoryMiddleware(),
-        DialogueStateMiddleware(),
+        MemoryMiddleware(memory=memory_service),
+        DialogueStateMiddleware(dialogue_state=dialogue_state_service),
         SummarizationMiddleware(
             llm=chatbot_model,
             model_name=resolve_model_identifier(),
@@ -63,6 +67,8 @@ async def make_chatbot_agent(
         tools,
         checkpointer,
         middlewares=middlewares,
+        memory_service=memory_service,
+        dialogue_state_service=dialogue_state_service,
         mcp_manager=mcp_manager,
     )
     await agent.compile()

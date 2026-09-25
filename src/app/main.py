@@ -54,8 +54,10 @@ async def lifespan(app: FastAPI):
     app.state.user_repository = make_user_repository(db_session)
     app.state.session_repository = make_session_repository(db_session)
 
-    app.state.memory_service = make_memory_service(settings)
-    app.state.dialogue_state_service = make_dialogue_state_service(settings)
+    memory_service = make_memory_service(settings)
+    app.state.memory_service = memory_service
+    dialogue_state_service = make_dialogue_state_service(settings)
+    app.state.dialogue_state_service = dialogue_state_service
 
     embeddings_client = OpenAIEmbeddingsClient(settings) if settings.CACHE_SEMANTIC_ENABLED else None
     app.state.cache_client = make_cache_client(settings, embeddings_client=embeddings_client)
@@ -73,10 +75,16 @@ async def lifespan(app: FastAPI):
 
     app.state.chatbot_agent = await make_chatbot_agent(
         checkpointer,
+        memory_service,
+        dialogue_state_service,
         langfuse_tracer=langfuse_tracer,
         mcp_manager=mcp_manager,
     )
-    app.state.deep_research_agent = await make_deep_research_agent(checkpointer, langfuse_tracer=langfuse_tracer)
+    app.state.deep_research_agent = await make_deep_research_agent(
+        checkpointer,
+        memory_service,
+        langfuse_tracer=langfuse_tracer,
+    )
     app.state.text_to_sql_agent = await make_text_to_sql_agent(langfuse_tracer=langfuse_tracer)
 
     logger.info(

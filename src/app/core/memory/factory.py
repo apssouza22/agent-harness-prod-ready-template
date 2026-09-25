@@ -1,7 +1,5 @@
 """Long-term memory service factory."""
 
-from functools import lru_cache
-
 from src.app.core.common.config import Settings, settings as default_settings
 from src.app.core.memory.memory import MemoryService
 
@@ -19,12 +17,9 @@ def make_memory_service(app_settings: Settings | None = None) -> MemoryService:
     return MemoryService(resolved_settings)
 
 
-@lru_cache(maxsize=1)
-def make_memory_service_cached() -> MemoryService:
-    """Return a process-wide cached memory service using default settings."""
-    return make_memory_service()
-
-
 def make_memory_service_fresh(app_settings: Settings | None = None) -> MemoryService:
-    """Create a new memory service bypassing the process-wide cache."""
+    """Create a new memory service instance.
+
+    Useful in tests that need an isolated service.
+    """
     return make_memory_service(app_settings)
