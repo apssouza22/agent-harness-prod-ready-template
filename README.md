@@ -58,7 +58,7 @@ Your agent is a self-contained directory under `src/app/agents/`.  The harness h
 - Interactive CLI with colored output
 
 **DevOps**
-- Docker Compose stack: PostgreSQL (pgvector), Prometheus, Grafana, cAdvisor
+- Docker Compose stack: PostgreSQL (pgvector), Bifrost (optional LLM gateway), Ollama (optional local LLM), Prometheus, Grafana, cAdvisor
 - Environment-specific configs (`.env.development`, `.env.staging`, `.env.production`)
 - Makefile for all common operations
 - GitHub Actions CI/CD workflow
@@ -175,6 +175,56 @@ make docker-compose-up ENV=development
 Monitoring endpoints:
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000/d/llm-latency/llm-observability` (admin/admin)
+- Bifrost UI: `http://localhost:8090`
+
+### Bifrost and Ollama (optional)
+
+When `BIFROST_ENABLED=true`, all LLM calls route through [Bifrost](https://docs.getbifrost.ai/integrations/langchain-sdk) instead of hitting provider APIs directly. Provider keys and governance (virtual keys, budgets, rate limits) live in `observability/bifrost/config.json`.
+
+Relevant env vars (see `.env.example`):
+
+| Variable | Description |
+|----------|-------------|
+| `BIFROST_ENABLED` | Route LLM calls through Bifrost |
+| `BIFROST_BASE_URL` | LangChain proxy (default `http://localhost:8090/langchain`) |
+| `BIFROST_API_KEY` | Dummy key; real provider keys are configured in Bifrost |
+| `BIFROST_API_KEY_AGENT_1` | Virtual key for agent-1 (`x-bf-vk` header) |
+| `BIFROST_API_KEY_AGENT_2` | Virtual key for agent-2 (`x-bf-vk` header) |
+
+#### Ollama setup
+
+Ollama runs as a Docker service and is registered in Bifrost as a local LLM provider (`http://ollama:11434`). **Models are not downloaded automatically** — pull them manually before use.
+
+1. Start Ollama:
+
+```bash
+docker compose up -d ollama
+```
+
+2. Pull the models allowed in Bifrost governance (one-time per model):
+
+```bash
+docker compose exec ollama ollama pull llama3.2:1b
+docker compose exec ollama ollama pull llama3.2:3b
+```
+
+3. Verify models are available:
+
+```bash
+docker compose exec ollama ollama list
+```
+
+4. Start (or restart) Bifrost:
+
+```bash
+docker compose up -d bifrost
+```
+
+To use a different model, add it to the relevant virtual key `allowed_models` in `observability/bifrost/config.json`, then pull it:
+
+```bash
+docker compose exec ollama ollama pull <model>
+```
 
 ## Configuration
 

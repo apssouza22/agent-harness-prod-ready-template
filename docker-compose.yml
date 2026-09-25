@@ -123,7 +123,6 @@ services:
       - monitoring
     restart: unless-stopped
 
-
   ollama:
     image: ollama/ollama:latest
     ports:
@@ -138,6 +137,7 @@ services:
       start_period: 30s
     networks:
       - monitoring
+    restart: unless-stopped
 
 networks:
   monitoring:

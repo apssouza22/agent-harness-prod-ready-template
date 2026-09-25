@@ -1,6 +1,26 @@
 {
   "$schema": "https://www.getbifrost.ai/schema",
   "providers": {
+    "ollama": {
+      "network_config": {
+        "allow_private_network": true,
+        "default_request_timeout_in_seconds": 120,
+        "max_retries": 3,
+        "retry_backoff_initial": 500,
+        "retry_backoff_max": 5000
+      },
+      "keys": [
+        {
+          "name": "ollama-docker",
+          "value": "",
+          "models": ["*"],
+          "weight": 1.0,
+          "ollama_key_config": {
+            "url": "http://ollama:11434"
+          }
+        }
+      ]
+    },
     "openai": {
       "network_config": {
         "default_request_timeout_in_seconds": 120,
@@ -49,6 +69,12 @@
               "text-embedding-3-large"
             ],
             "key_ids": ["*"]
+          },
+          {
+            "provider": "ollama",
+            "weight": 0.3,
+            "allowed_models": ["llama3.2:1b", "llama3.2:3b"],
+            "key_ids": ["*"]
           }
         ],
         "rate_limit_id": "rate-limit-agent-1"
@@ -71,6 +97,12 @@
               "text-embedding-3-small",
               "text-embedding-3-large"
             ],
+            "key_ids": ["*"]
+          },
+          {
+            "provider": "ollama",
+            "weight": 0.4,
+            "allowed_models": ["llama3.2:1b"],
             "key_ids": ["*"]
           }
         ],
