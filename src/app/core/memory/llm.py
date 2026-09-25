@@ -25,5 +25,4 @@ def make_memory_chat_model(app_settings: Settings | None = None) -> BaseChatMode
         app_settings=resolved_settings,
         bifrost_agent="agent_1",
         max_tokens=resolved_settings.MAX_TOKENS,
-        response_format={"type": "json_object"},
     )

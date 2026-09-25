@@ -1,11 +1,11 @@
 """Unit tests for memory reconciliation."""
 
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.app.core.common.config import settings
+from src.app.core.memory.models import MemoryReconcileItem, MemoryReconcileOutput
 from src.app.core.memory.reconciler import MemoryReconciler
 
 
@@ -15,14 +15,19 @@ def reconciler() -> MemoryReconciler:
 
 
 def test_parse_actions_maps_update_delete_and_add(reconciler: MemoryReconciler) -> None:
-    payload = {
-        "memory": [
-            {"id": "0", "text": "Works at Acme Corp", "event": "UPDATE", "old_memory": "Works at Old Corp"},
-            {"id": "1", "text": "Loves cheese pizza", "event": "DELETE"},
-            {"id": "2", "text": "Prefers dark mode", "event": "NONE"},
-            {"id": "3", "text": "Uses Python daily", "event": "ADD"},
+    payload = MemoryReconcileOutput(
+        memory=[
+            MemoryReconcileItem(
+                id="0",
+                text="Works at Acme Corp",
+                event="UPDATE",
+                old_memory="Works at Old Corp",
+            ),
+            MemoryReconcileItem(id="1", text="Loves cheese pizza", event="DELETE"),
+            MemoryReconcileItem(id="2", text="Prefers dark mode", event="NONE"),
+            MemoryReconcileItem(id="3", text="Uses Python daily", event="ADD"),
         ]
-    }
+    )
     id_mapping = {"0": "uuid-0", "1": "uuid-1", "2": "uuid-2"}
 
     actions = reconciler._parse_actions(payload, id_mapping)
@@ -40,7 +45,9 @@ def test_parse_actions_maps_update_delete_and_add(reconciler: MemoryReconciler) 
 
 
 def test_parse_actions_skips_unknown_ids(reconciler: MemoryReconciler) -> None:
-    payload = {"memory": [{"id": "99", "text": "Unknown", "event": "DELETE"}]}
+    payload = MemoryReconcileOutput(
+        memory=[MemoryReconcileItem(id="99", text="Unknown", event="DELETE")]
+    )
 
     actions = reconciler._parse_actions(payload, {"0": "uuid-0"})
 
@@ -57,15 +64,19 @@ async def test_reconcile_without_existing_memories_adds_all_facts(reconciler: Me
 
 @pytest.mark.asyncio
 async def test_reconcile_uses_injected_chat_model() -> None:
-    payload = {
-        "memory": [
-            {"id": "0", "text": "Works at Acme Corp", "event": "UPDATE", "old_memory": "Works at Old Corp"},
+    mock_wrapped = AsyncMock()
+    mock_wrapped.ainvoke.return_value = MemoryReconcileOutput(
+        memory=[
+            MemoryReconcileItem(
+                id="0",
+                text="Works at Acme Corp",
+                event="UPDATE",
+                old_memory="Works at Old Corp",
+            ),
         ]
-    }
-    mock_response = MagicMock()
-    mock_response.content = json.dumps(payload)
-    mock_llm = AsyncMock()
-    mock_llm.ainvoke.return_value = mock_response
+    )
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_wrapped
     reconciler = MemoryReconciler(settings, chat_model=mock_llm)
 
     actions = await reconciler.reconcile(
@@ -74,6 +85,7 @@ async def test_reconcile_uses_injected_chat_model() -> None:
         id_mapping={"0": "uuid-0"},
     )
 
-    mock_llm.ainvoke.assert_awaited_once()
+    mock_llm.with_structured_output.assert_called_once()
+    mock_wrapped.ainvoke.assert_awaited_once()
     assert len(actions) == 1
     assert actions[0].event == "UPDATE"

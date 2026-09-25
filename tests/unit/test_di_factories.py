@@ -77,7 +77,7 @@ def test_make_memory_chat_model_forwards_bifrost_agent(test_settings):
         make_memory_chat_model(test_settings)
 
     assert captured_kwargs.get("bifrost_agent") == "agent_1"
-    assert captured_kwargs.get("response_format") == {"type": "json_object"}
+    assert "response_format" not in captured_kwargs
 
 
 def test_make_memory_service_fresh_returns_new_instance(test_settings):

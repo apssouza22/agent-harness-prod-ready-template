@@ -1,15 +1,14 @@
 """Reconcile new facts with existing memories using LLM-guided actions."""
 
-import json
-import re
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import logger
+from src.app.core.memory.models import MemoryReconcileOutput
 from src.app.core.memory.prompts import build_memory_reconcile_prompt
 
 MemoryEvent = Literal["ADD", "UPDATE", "DELETE", "NONE"]
@@ -26,19 +25,12 @@ class MemoryAction:
     previous_memory: str | None = None
 
 
-def _strip_code_blocks(text: str) -> str:
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
-    return text.strip()
-
-
 class MemoryReconciler:
     """Compare extracted facts with existing memories and choose ADD/UPDATE/DELETE/NONE."""
 
     def __init__(self, app_settings: Settings, chat_model: BaseChatModel) -> None:
         self._settings = app_settings
-        self._chat_model = chat_model
+        self._chat_model = chat_model.with_structured_output(MemoryReconcileOutput)
 
     async def reconcile(
         self,
@@ -62,30 +54,25 @@ class MemoryReconciler:
                     HumanMessage(content=prompt),
                 ]
             )
-            raw_content = _strip_code_blocks(str(response.content))
-            if not raw_content:
+            if not isinstance(response, MemoryReconcileOutput):
                 return []
 
-            parsed = json.loads(raw_content)
-            return self._parse_actions(parsed, id_mapping)
+            return self._parse_actions(response, id_mapping)
         except Exception:
             logger.exception("memory_reconciliation_failed")
             return []
 
-    def _parse_actions(self, payload: dict[str, Any], id_mapping: dict[str, str]) -> list[MemoryAction]:
+    def _parse_actions(self, payload: MemoryReconcileOutput, id_mapping: dict[str, str]) -> list[MemoryAction]:
         actions: list[MemoryAction] = []
-        for item in payload.get("memory", []):
-            if not isinstance(item, dict):
-                continue
-
-            event = str(item.get("event", "")).upper()
-            text = str(item.get("text", "")).strip()
+        for item in payload.memory:
+            event = item.event.upper()
+            text = item.text.strip()
             if event not in VALID_EVENTS or not text:
                 continue
 
-            temp_id = str(item.get("id", "")).strip()
-            previous_memory = item.get("old_memory")
-            previous_memory_text = str(previous_memory).strip() if previous_memory else None
+            temp_id = item.id.strip()
+            previous_memory = item.old_memory
+            previous_memory_text = previous_memory.strip() if previous_memory else None
 
             if event == "ADD":
                 actions.append(MemoryAction(event="ADD", text=text))
