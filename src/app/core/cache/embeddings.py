@@ -2,6 +2,7 @@ from langchain_openai import OpenAIEmbeddings
 
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import logger
+from src.app.core.llm.factory import build_openai_embeddings_kwargs
 
 
 class OpenAIEmbeddingsClient:
@@ -9,11 +10,13 @@ class OpenAIEmbeddingsClient:
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._embeddings = OpenAIEmbeddings(
+        kwargs = build_openai_embeddings_kwargs(
+            settings,
+            bifrost_agent="agent_1",
             model=settings.CACHE_EMBEDDER_MODEL,
-            api_key=settings.OPENAI_API_KEY or None,
             dimensions=settings.CACHE_EMBEDDING_DIMENSIONS,
         )
+        self._embeddings = OpenAIEmbeddings(**kwargs)
 
     async def embed_query(self, text: str) -> list[float]:
         """Embed a query string asynchronously."""

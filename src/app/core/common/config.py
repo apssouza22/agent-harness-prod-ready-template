@@ -146,8 +146,11 @@ class Settings:
 
         # Bifrost API Gateway (https://docs.getbifrost.ai/integrations/langchain-sdk)
         self.BIFROST_ENABLED = os.getenv("BIFROST_ENABLED", "false").lower() in ("true", "1", "t", "yes")
-        self.BIFROST_BASE_URL = os.getenv("BIFROST_BASE_URL", "http://localhost:8080/langchain")
-        self.BIFROST_OPENAI_BASE_URL = os.getenv("BIFROST_OPENAI_BASE_URL", "http://localhost:8080/v1")
+        self.BIFROST_BASE_URL = os.getenv("BIFROST_BASE_URL", "http://localhost:8090/langchain")
+        self.BIFROST_OPENAI_BASE_URL = os.getenv(
+            "BIFROST_OPENAI_BASE_URL",
+            self._derive_bifrost_openai_base_url(self.BIFROST_BASE_URL),
+        )
         self.BIFROST_API_KEY = os.getenv("BIFROST_API_KEY", "dummy-key")
         self.BIFROST_VIRTUAL_KEY = os.getenv("BIFROST_VIRTUAL_KEY", "")
         self.BIFROST_API_KEY_AGENT_1 = os.getenv("BIFROST_API_KEY_AGENT_1", "")
@@ -164,7 +167,7 @@ class Settings:
         self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-5.6-luna")
         self.DEFAULT_LLM_REASONING_EFFORT = os.getenv("DEFAULT_LLM_REASONING_EFFORT", "low")
         self.DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))
-        self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))
+        self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "20000"))
         self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "3"))
 
         # LangGraph fault tolerance (RetryPolicy, TimeoutPolicy, error handlers)
@@ -337,6 +340,14 @@ class Settings:
 
         # Apply environment-specific settings
         self.apply_environment_settings()
+
+    @staticmethod
+    def _derive_bifrost_openai_base_url(bifrost_langchain_url: str) -> str:
+        """Derive the OpenAI-compatible Bifrost URL from the LangChain proxy URL."""
+        normalized = bifrost_langchain_url.rstrip("/")
+        if normalized.endswith("/langchain"):
+            return f"{normalized[: -len('/langchain')]}/v1"
+        return "http://localhost:8090/v1"
 
     def apply_environment_settings(self):
         """Apply environment-specific settings based on the current environment."""

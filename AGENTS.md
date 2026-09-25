@@ -59,6 +59,7 @@ This is a production-ready AI agent application built with:
 - Use `CompiledStateGraph` for production workflows
 - Implement `AsyncPostgresSaver` for checkpointing and persistence
 - Use `Command` for controlling graph flow between nodes
+- Use llm.with_structured_output
 
 ## Database Operations
 - Use SQLModel for ORM models (combines SQLAlchemy + Pydantic)

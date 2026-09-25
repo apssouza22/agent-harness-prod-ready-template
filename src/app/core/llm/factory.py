@@ -340,6 +340,31 @@ def make_chat_model(
     return chat_model.with_fallbacks(fallback_models)
 
 
+def build_openai_embeddings_kwargs(
+    app_settings: Settings | None = None,
+    *,
+    bifrost_agent: BifrostAgent | None = None,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Build kwargs for LangChain OpenAI embedding clients with optional Bifrost routing."""
+    resolved_settings = _resolve_settings(app_settings)
+    kwargs: dict[str, Any] = dict(overrides)
+
+    if resolved_settings.BIFROST_ENABLED:
+        kwargs["base_url"] = get_bifrost_openai_base_url(resolved_settings)
+        kwargs["api_key"] = resolved_settings.BIFROST_API_KEY
+        bifrost_headers = get_bifrost_default_headers(resolved_settings, bifrost_agent=bifrost_agent)
+        if bifrost_headers:
+            existing_headers = kwargs.get("default_headers", {})
+            kwargs["default_headers"] = {**existing_headers, **bifrost_headers}
+        return kwargs
+
+    api_key = kwargs.pop("api_key", resolved_settings.OPENAI_API_KEY)
+    if api_key:
+        kwargs["api_key"] = api_key
+    return kwargs
+
+
 def build_openai_client_kwargs(
     app_settings: Settings | None = None,
     *,

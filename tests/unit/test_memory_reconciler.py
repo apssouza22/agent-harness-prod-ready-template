@@ -1,5 +1,8 @@
 """Unit tests for memory reconciliation."""
 
+import json
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from src.app.core.common.config import settings
@@ -50,3 +53,37 @@ async def test_reconcile_without_existing_memories_adds_all_facts(reconciler: Me
 
     assert [action.event for action in actions] == ["ADD", "ADD"]
     assert [action.text for action in actions] == ["Name is John", "Uses Rust"]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_forwards_bifrost_agent(reconciler: MemoryReconciler) -> None:
+    payload = {
+        "memory": [
+            {"id": "0", "text": "Works at Acme Corp", "event": "UPDATE", "old_memory": "Works at Old Corp"},
+        ]
+    }
+    mock_response = MagicMock()
+    mock_response.content = json.dumps(payload)
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke.return_value = mock_response
+
+    captured_kwargs: dict[str, object] = {}
+
+    def capture_make_chat_model(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return mock_llm
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "src.app.core.memory.reconciler.make_chat_model",
+            capture_make_chat_model,
+        )
+        actions = await reconciler.reconcile(
+            [{"id": "0", "text": "Works at Old Corp"}],
+            ["Works at Acme Corp"],
+            id_mapping={"0": "uuid-0"},
+        )
+
+    assert captured_kwargs.get("bifrost_agent") == "agent_1"
+    assert len(actions) == 1
+    assert actions[0].event == "UPDATE"

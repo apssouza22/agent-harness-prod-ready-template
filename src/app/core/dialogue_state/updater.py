@@ -1,7 +1,6 @@
 """LLM-based dialogue state updater."""
 
 import json
-import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -9,19 +8,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import logger
 from src.app.core.dialogue_state.config_builder import resolve_dialogue_state_provider
-from src.app.core.dialogue_state.models import DialogueState
+from src.app.core.dialogue_state.models import DialogueState, DialogueStateLLMOutput
 from src.app.core.dialogue_state.prompts import (
     DEFAULT_DIALOGUE_STATE_UPDATE_PROMPT,
     build_dialogue_state_update_prompt,
 )
 from src.app.core.llm.factory import make_chat_model, resolve_model_identifier
-
-
-def _strip_code_blocks(text: str) -> str:
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
-    return text.strip()
 
 
 def _parse_messages_for_prompt(messages: list[dict[str, Any]]) -> str:
@@ -65,25 +57,20 @@ class DialogueStateUpdater:
             app_settings=self._settings,
             bifrost_agent="agent_1",
             max_tokens=self._settings.MAX_TOKENS,
-            response_format={"type": "json_object"},
-        )
-
+        ).with_structured_output(DialogueStateLLMOutput)
         previous_state_json = json.dumps(previous_state.model_dump(), ensure_ascii=True)
         user_prompt = build_dialogue_state_update_prompt(previous_state_json, conversation)
 
         try:
-            response = await llm.ainvoke(
+            updated_output = await llm.ainvoke(
                 [
                     SystemMessage(content=DEFAULT_DIALOGUE_STATE_UPDATE_PROMPT),
                     HumanMessage(content=user_prompt),
                 ]
             )
-            raw_content = _strip_code_blocks(str(response.content))
-            if not raw_content:
+            if not isinstance(updated_output, DialogueStateLLMOutput):
                 return previous_state
-
-            parsed = json.loads(raw_content)
-            return DialogueState.model_validate(parsed)
+            return updated_output.to_dialogue_state()
         except Exception:
             logger.exception("dialogue_state_update_failed")
             return previous_state

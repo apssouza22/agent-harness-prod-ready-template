@@ -5,7 +5,7 @@ from langchain_openai import OpenAIEmbeddings
 
 from src.app.core.common.config import Settings
 from src.app.core.common.logging import logger
-from src.app.core.llm.factory import build_bedrock_client_kwargs, resolve_model_identifier
+from src.app.core.llm.factory import build_bedrock_client_kwargs, build_openai_embeddings_kwargs
 from src.app.core.memory.config_builder import (
     normalize_memory_model,
     resolve_memory_provider,
@@ -33,16 +33,12 @@ class MemoryEmbedder:
 
     def _get_openai_embeddings(self) -> OpenAIEmbeddings:
         if self._openai_embeddings is None:
-            kwargs: dict = {
-                "model": self._resolve_model(),
-                "dimensions": self._settings.LONG_TERM_MEMORY_EMBEDDING_DIMENSIONS,
-            }
-            if self._settings.BIFROST_ENABLED:
-                kwargs["api_key"] = self._settings.BIFROST_VIRTUAL_KEY or self._settings.BIFROST_API_KEY
-                kwargs["base_url"] = self._settings.BIFROST_OPENAI_BASE_URL
-            elif self._settings.OPENAI_API_KEY:
-                kwargs["api_key"] = self._settings.OPENAI_API_KEY
-
+            kwargs = build_openai_embeddings_kwargs(
+                self._settings,
+                bifrost_agent="agent_1",
+                model=self._resolve_model(),
+                dimensions=self._settings.LONG_TERM_MEMORY_EMBEDDING_DIMENSIONS,
+            )
             self._openai_embeddings = OpenAIEmbeddings(**kwargs)
         return self._openai_embeddings
 

@@ -70,6 +70,14 @@ def test_build_chat_model_kwargs_without_bifrost(direct_settings):
     assert kwargs["api_key"] == "sk-test-openai"
 
 
+def test_build_openai_embeddings_kwargs_with_bifrost(bifrost_settings):
+    kwargs = factory.build_openai_embeddings_kwargs(bifrost_settings, bifrost_agent="agent_1")
+
+    assert kwargs["base_url"] == "http://bifrost:8080/v1"
+    assert kwargs["api_key"] == "test-dummy-key"
+    assert kwargs["default_headers"] == {"x-bf-vk": "sk-bf-agent-1-test"}
+
+
 def test_build_openai_client_kwargs_with_bifrost(bifrost_settings):
     kwargs = factory.build_openai_client_kwargs()
 

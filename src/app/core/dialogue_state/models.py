@@ -3,6 +3,37 @@
 from pydantic import BaseModel, Field
 
 
+class DialogueSlot(BaseModel):
+    """Key-value slot emitted by structured LLM output."""
+
+    key: str
+    value: str
+
+
+class DialogueStateLLMOutput(BaseModel):
+    """OpenAI-compatible structured output for dialogue state updates."""
+
+    topic: str = ""
+    active_goals: list[str] = Field(default_factory=list)
+    slots: list[DialogueSlot] = Field(default_factory=list)
+    pending_clarifications: list[str] = Field(default_factory=list)
+    entities_in_focus: list[str] = Field(default_factory=list)
+    conversation_phase: str = ""
+    summary: str = ""
+
+    def to_dialogue_state(self) -> "DialogueState":
+        """Convert structured LLM output into persisted dialogue state."""
+        return DialogueState(
+            topic=self.topic,
+            active_goals=self.active_goals,
+            slots={slot.key: slot.value for slot in self.slots if slot.key.strip()},
+            pending_clarifications=self.pending_clarifications,
+            entities_in_focus=self.entities_in_focus,
+            conversation_phase=self.conversation_phase,
+            summary=self.summary,
+        )
+
+
 class DialogueState(BaseModel):
     """Structured conversation state for a single session."""
 

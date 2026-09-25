@@ -131,8 +131,13 @@ docker compose up
 # Configure environment
 cp .env.example .env.development
 # Edit .env.development with your keys (OPENAI_API_KEY, POSTGRES_*, LANGFUSE_*, JWT_SECRET_KEY)
+# For local dev, point MCP at the sample server:
+# MCP_HOSTNAMES_CSV=http://localhost:7001
 
-# Run
+# Start the sample MCP server (separate terminal)
+uv run python src/mcp/server.py
+
+# Run the API
 make dev
 ```
 Swagger UI: `http://localhost:8000/docs`
